@@ -415,7 +415,8 @@
   }
   let API_TOKEN = '';
   if (IS_SITE) {
-    const fromUrl = tokenFromText(location.hash);
+    // 合言葉は #t= でも ?t= でも受け取る（QR読み取りアプリによっては # 以降が落ちるため）
+    const fromUrl = tokenFromText(location.hash) || tokenFromText(location.search);
     try {
       if (fromUrl) localStorage.setItem(TOKEN_KEY, fromUrl);
       API_TOKEN = fromUrl || localStorage.getItem(TOKEN_KEY) || '';
