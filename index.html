@@ -207,6 +207,10 @@
   .adj button:active { background: var(--hour); }
   .field { margin-top: 12px; border-radius: 14px; padding: 8px 10px 4px; background: var(--surface-2); border-left: 4px solid; }
   .field.plan { border-color: var(--plan); } .field.done { border-color: var(--done); }
+  .planref { display: flex; gap: 8px; align-items: baseline; margin-top: 10px; padding: 8px 12px; border-radius: 12px; background: var(--plan-bg); font-size: 13.5px; line-height: 1.45; }
+  .planref b { color: var(--plan); font-size: 11.5px; flex: none; }
+  .planref span { white-space: pre-wrap; word-break: break-word; }
+  .planref[hidden] { display: none; }
   .field.ans { border-color: var(--keep); padding-bottom: 8px; }
   .field.ans label { color: var(--keep); }
   .tag.ans-tag { background: var(--keep-bg); }
@@ -317,10 +321,9 @@
     <span class="gap">終了</span><button type="button" data-adj="end:-10">−10分</button><button type="button" data-adj="end:10">＋10分</button>
   </div>
 
-  <div class="field plan">
-    <label>予定 <span class="tag" id="calTag"></span></label>
-    <textarea id="fPlan" rows="1" placeholder="予定を入力"></textarea>
-  </div>
+  <!-- 予定はカレンダーから自動で入るので入力欄は出さず、参考として表示だけする -->
+  <div class="planref" id="planRef"><b>予定</b><span id="planRefText"></span></div>
+  <textarea id="fPlan" hidden></textarea>
   <div class="field done">
     <label>実施 <span class="tag done-tag">実施カレンダーに登録</span><button class="mini" id="asPlanned" type="button">予定どおり</button></label>
     <textarea id="fDone" rows="1" placeholder="実際にやったこと"></textarea>
@@ -587,10 +590,10 @@
     state.edit.ans = val('ans') ? val('ans').split('、').filter(String) : [];
     state.edit.ansAll = false;
     renderAnsChips();
-    // もともとカレンダーにある予定はカレンダー側で編集する（アプリから登録した予定は編集可）
-    const external = !!(planSpan && planSpan.cal && !planSpan.appEventId);
-    $('fPlan').readOnly = external;
-    $('calTag').textContent = external ? 'カレンダーの予定（カレンダー側で編集）' : 'カレンダーに登録';
+    // 予定は表示だけ（変更はカレンダー側で行う）
+    $('planRef').hidden = !plan.rest;
+    $('planRefText').textContent = plan.rest;
+    $('asPlanned').style.display = plan.rest ? '' : 'none';
     $('delBtn').style.display = prev ? '' : 'none';
 
     // 直前のネクストアクションを参考表示
@@ -1055,7 +1058,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261009232654';
+  const APP_VERSION = '20261009233408';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
