@@ -143,7 +143,7 @@
   .cell { border-top: 1px solid var(--line); }
   .cell.h { border-top-color: var(--hour); }
   .cell.night { background: var(--night); }
-  .cell:active { background: var(--surface-2); }
+  .cell { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 
   .blk {
     position: relative; z-index: 2; margin: 2px 0 1px; padding: 5px 6px 4px 7px;
@@ -797,10 +797,33 @@
   }
 
   /* ---------- イベント ---------- */
+  // 記録・予定のブロックはタップで開く。空いている枠はタップでは開かず、長押し（PCはダブルクリック）で新規記録
   $('grid').addEventListener('click', (ev) => {
-    const el = ev.target.closest('[data-slot]');
+    if (Date.now() - lastScrollAt < 350) return; // スクロールを止めたときのタップでは開かない
+    const el = ev.target.closest('.blk[data-slot]');
     if (el) openEditor(Number(el.dataset.slot));
   });
+  $('grid').addEventListener('dblclick', (ev) => {
+    const el = ev.target.closest('.cell[data-slot]');
+    if (el) openEditor(Number(el.dataset.slot));
+  });
+  let lastScrollAt = 0;
+  $('scroller').addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
+  (() => {
+    let timer = null, x0 = 0, y0 = 0;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    $('grid').addEventListener('touchstart', (ev) => {
+      const el = ev.target.closest('.cell[data-slot]');
+      if (!el) return;
+      x0 = ev.touches[0].clientX; y0 = ev.touches[0].clientY;
+      timer = setTimeout(() => { timer = null; openEditor(Number(el.dataset.slot)); }, 450);
+    }, { passive: true });
+    $('grid').addEventListener('touchmove', (ev) => {
+      if (timer && Math.hypot(ev.touches[0].clientX - x0, ev.touches[0].clientY - y0) > 10) cancel();
+    }, { passive: true });
+    $('grid').addEventListener('touchend', cancel, { passive: true });
+    $('grid').addEventListener('touchcancel', cancel, { passive: true });
+  })();
   $('week').addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-date]');
     if (el) load(el.dataset.date);
@@ -1058,7 +1081,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261009233408';
+  const APP_VERSION = '20261009234004';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
