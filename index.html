@@ -515,7 +515,7 @@
       const night = i < 12 || i >= 46 ? ' night' : '';
       html.push('<div class="t' + h + '" style="grid-row:' + (i + 1) + ';grid-column:1">' + (h ? slotLabel(i) : '') + '</div>');
       for (let c = 0; c < 4; c++) {
-        html.push('<div class="cell' + h + night + '" data-slot="' + i + '" style="grid-row:' + (i + 1) + ';grid-column:' + (c + 2) + '"></div>');
+        html.push('<div class="cell' + h + night + '" data-slot="' + i + '" data-c="' + c + '" style="grid-row:' + (i + 1) + ';grid-column:' + (c + 2) + '"></div>');
       }
     }
     // 実施に正確な時刻があれば、その記録のブロックは実際にかかる枠だけに描く（15分未満の端の枠は空ける）
@@ -842,9 +842,12 @@
   }
 
   /* ---------- イベント ---------- */
-  // 記録・予定のブロックはタップで開く。空いている枠はタップでは開かず、長押し（PCはダブルクリック）で新規記録
+  // 記録・予定のブロックはタップで開く
   $('grid').addEventListener('click', (ev) => {
     if (Date.now() - lastScrollAt < 350) return; // スクロールを止めたときのタップでは開かない
+    // 実施・所感・仮説の列の空き枠は1回のタップで新しい記録を開く（予定の列は入力しないので開かない）
+    const cell = ev.target.closest('.cell[data-slot]');
+    if (cell) { if (cell.dataset.c !== '0') openEditor(Number(cell.dataset.slot)); return; }
     const el = ev.target.closest('.blk[data-slot]');
     if (!el) return;
     // ブロックの中で押した位置の時間で判断する
@@ -852,27 +855,8 @@
     const rowH = row.height / (Number(el.dataset.len) || 1);
     openEditor(Number(el.dataset.slot) + Math.max(0, Math.floor((ev.clientY - row.top) / rowH)));
   });
-  $('grid').addEventListener('dblclick', (ev) => {
-    const el = ev.target.closest('.cell[data-slot]');
-    if (el) openEditor(Number(el.dataset.slot));
-  });
   let lastScrollAt = 0;
   $('scroller').addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
-  (() => {
-    let timer = null, x0 = 0, y0 = 0;
-    const cancel = () => { clearTimeout(timer); timer = null; };
-    $('grid').addEventListener('touchstart', (ev) => {
-      const el = ev.target.closest('.cell[data-slot]');
-      if (!el) return;
-      x0 = ev.touches[0].clientX; y0 = ev.touches[0].clientY;
-      timer = setTimeout(() => { timer = null; openEditor(Number(el.dataset.slot)); }, 450);
-    }, { passive: true });
-    $('grid').addEventListener('touchmove', (ev) => {
-      if (timer && Math.hypot(ev.touches[0].clientX - x0, ev.touches[0].clientY - y0) > 10) cancel();
-    }, { passive: true });
-    $('grid').addEventListener('touchend', cancel, { passive: true });
-    $('grid').addEventListener('touchcancel', cancel, { passive: true });
-  })();
   $('week').addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-date]');
     if (el) load(el.dataset.date);
@@ -1136,7 +1120,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261009234346';
+  const APP_VERSION = '20261009234812';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
