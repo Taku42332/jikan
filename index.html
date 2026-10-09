@@ -758,9 +758,7 @@
     const plan = $('fPlan').value.trim();
     const planChanged = plan !== ed.origPlan;
     if (planChanged) fields.plan = plan;
-    // 予定が無い時間の実施は、予定としても記録する（画面にも先に反映）
-    const hasPlan = state.day.columns.plan.some((sp) => sp.s <= ed.e && ed.s <= sp.e);
-    if (!planChanged && !plan && !hasPlan && fields.done) fields.plan = fields.done;
+    // 予定が無い時間の実施は、サーバー側でシートの予定欄にだけ写す（カレンダーへは送らない）
     if (!ed.prev && !fields.done && !fields.feel && !fields.next && !fields.ans && !planChanged) { closeEditor(); return; }
 
     const payload = { date: state.date, start: ed.s, end: ed.e, startMin: ed.startMin, endMin: ed.endMin, fields, prev: ed.prev };
@@ -1145,7 +1143,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010045954';
+  const APP_VERSION = '20261010061413';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
