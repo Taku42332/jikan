@@ -830,6 +830,17 @@
     return list.reduce((p, x) => p.then(() => send(x.fn, x.payload, null)), Promise.resolve());
   }
 
+  // 登録待ちが残っていたり失敗していたら知らせる（起動時と保存後）
+  function checkCalendarStatus() {
+    call('getCalendarStatus').then((st) => {
+      if (!st) return;
+      if (st.pending && st.oldestMin >= 3) {
+        toast('カレンダー登録待ち ' + st.pending + '件' + (st.lastError ? '（' + st.lastError + '）' : ''));
+        runCalendarJobs();
+      }
+    }).catch(() => {});
+  }
+
   // カレンダー登録は保存のあとで裏で行う
   let calRunning = false;
   function runCalendarJobs() {
@@ -842,7 +853,8 @@
         if (state.date === d && state.mode === 'day' && !state.edit) { state.day = res.days[d]; render(); }
       });
       if (res.warnings && res.warnings.length) toast(res.warnings[0]);
-    }).catch(() => {}).finally(() => { calRunning = false; });
+    }).catch((err) => toast('カレンダー登録の処理に失敗しました：' + (err && err.message || err)))
+      .finally(() => { calRunning = false; checkCalendarStatus(); });
   }
 
   let toastTimer;
@@ -1117,6 +1129,7 @@
       getDay: (d) => clone(base(d)),
       syncDay: () => null,
       processCalendarJobs: () => ({ done: 0, warnings: [], days: {} }),
+      getCalendarStatus: () => ({ pending: 0, oldestMin: 0, lastError: '', hasTrigger: true }),
       getGoals: (type, key) => clone(goalStore[type + key] || { type, key, goals: [
         { goal: type === 'week' ? '（サンプル目標）' : '', result: '', keep: '', problem: '', try: '' }, {}, {}],
         prevTry: [],
@@ -1132,7 +1145,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010045432';
+  const APP_VERSION = '20261010045954';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
@@ -1149,7 +1162,7 @@
   checkUpdate();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
   loadValues();
-  load(state.date, { scroll: true }).then(() => flushOutbox());
+  load(state.date, { scroll: true }).then(() => flushOutbox()).then(() => checkCalendarStatus());
 })();
 </script>
 </body>
