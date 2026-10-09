@@ -518,13 +518,19 @@
         html.push('<div class="cell' + h + night + '" data-slot="' + i + '" style="grid-row:' + (i + 1) + ';grid-column:' + (c + 2) + '"></div>');
       }
     }
+    // 実施に正確な時刻があれば、その記録のブロックは実際にかかる枠だけに描く（15分未満の端の枠は空ける）
+    const vis = {};
+    day.columns.done.forEach((sp) => { const x = exactOf(sp); vis[sp.s + '-' + sp.e] = slotsFor(x.startMin, x.endMin); });
     KEYS.forEach((k, c) => {
-      day.columns[k].forEach((sp) => {
+      day.columns[k].map((sp) => {
+        const v = k !== 'plan' && vis[sp.s + '-' + sp.e];
+        return v ? Object.assign({}, sp, { s: Math.max(sp.s, v[0]), e: Math.min(sp.e, v[1]) }) : sp;
+      }).forEach((sp) => {
         const meta = sp.e > sp.s ? '<div class="bm"><span>' + slotLabel(sp.s) + '〜' + endLabel(sp.e) + '</span></div>' : '';
         const cls = k === 'plan' && !sp.cal ? ' manual' : '';
         const a = k === 'done' && (day.columns.ans || []).find((x) => x.s <= sp.s && sp.s <= x.e);
         const badge = a ? '<div class="badge">◆ ' + esc(a.text.split('、').join('・')) + '</div>' : '';
-        html.push('<div class="blk ' + k + cls + '" data-slot="' + sp.s + '" style="grid-row:' + (sp.s + 1) + '/' + (sp.e + 2) + ';grid-column:' + (c + 2) + '"><div class="bt">' + esc(sp.text) + '</div>' + badge + meta + '</div>');
+        html.push('<div class="blk ' + k + cls + '" data-slot="' + sp.s + '" data-len="' + (sp.e - sp.s + 1) + '" style="grid-row:' + (sp.s + 1) + '/' + (sp.e + 2) + ';grid-column:' + (c + 2) + '"><div class="bt">' + esc(sp.text) + '</div>' + badge + meta + '</div>');
       });
     });
     // 終わった予定で実施が未記録のものに「記録する」枠を出す
@@ -567,13 +573,49 @@
   /* ---------- 入力シート ---------- */
   const spanAt = (k, slot) => state.day.columns[k].find((sp) => sp.s <= slot && slot <= sp.e);
 
-  function openEditor(slot) {
-    const anchor = spanAt('done', slot) || spanAt('feel', slot) || spanAt('next', slot);
+  // 記録が枠の何分を占めるか
+  function coverage(st, en, slot) { return Math.max(0, Math.min(en, (slot + 1) * 30) - Math.max(st, slot * 30)); }
+  // 正確な時刻 → シート上の枠。15分未満しかかからない端の枠は使わない（隣の記録に譲る）
+  function slotsFor(st, en) {
+    let s = Math.floor(st / 30), e = Math.ceil(en / 30) - 1;
+    if (e > s && coverage(st, en, s) < 15) s++;
+    if (e > s && coverage(st, en, e) < 15) e--;
+    return [s, e];
+  }
+  // 記録の正確な時刻（本文頭の「9:10〜9:30」、無ければ枠どおり）
+  function exactOf(sp) {
+    const t = splitTime(sp.text);
+    return t.startMin !== undefined && t.endMin > t.startMin ? t : { startMin: sp.s * 30, endMin: (sp.e + 1) * 30 };
+  }
+
+  // opts.newAt: 指定した分から始まる新しい記録として開く
+  function openEditor(slot, opts) {
+    opts = opts || {};
+    let anchor = opts.newAt !== undefined ? null : (spanAt('done', slot) || spanAt('feel', slot) || spanAt('next', slot));
+    let newRange = null;
+    if (opts.newAt !== undefined) newRange = [opts.newAt, Math.min(1440, opts.newAt + 30)];
+    if (anchor) {
+      // 記録が15分未満しかかかっていない枠をタップしたら、その記録ではなく空いている時間の新しい記録にする
+      const ex = exactOf(anchor);
+      if (coverage(ex.startMin, ex.endMin, slot) < 15) {
+        newRange = ex.startMin > slot * 30 ? [slot * 30, ex.startMin] : [ex.endMin, Math.max(ex.endMin + 10, (slot + 1) * 30)];
+        anchor = null;
+      }
+    }
+    if (!anchor && !newRange) {
+      // 空いた枠でも、前後の記録がこの枠の途中で終わる／始まるなら、その隙間を新しい記録の時間にする
+      const lo = slot * 30, hi = (slot + 1) * 30;
+      const exs = state.day.columns.done.map(exactOf);
+      const endIn = exs.map((x) => x.endMin).filter((m) => m > lo && m < hi);
+      const startIn = exs.map((x) => x.startMin).filter((m) => m > lo && m < hi);
+      if (endIn.length || startIn.length) newRange = [endIn.length ? Math.max(...endIn) : lo, startIn.length ? Math.min(...startIn) : hi];
+    }
     let s, e, prev = null;
-    if (anchor) { s = anchor.s; e = anchor.e; prev = { start: s, end: e }; }
+    if (newRange) { [s, e] = slotsFor(newRange[0], newRange[1]); }
+    else if (anchor) { s = anchor.s; e = anchor.e; prev = { start: s, end: e }; }
     else { const p = spanAt('plan', slot); if (p) { s = p.s; e = p.e; } else { s = e = slot; } }
 
-    const val = (k) => { const sp = spanAt(k, s); return sp ? sp.text : ''; };
+    const val = (k) => { if (newRange && k !== 'plan') return ''; const sp = spanAt(k, s); return sp ? sp.text : ''; };
     const planSpan = spanAt('plan', s);
     const done = splitTime(val('done'));
     const plan = splitTime(val('plan'));
@@ -581,6 +623,7 @@
     let startMin = s * 30, endMin = (e + 1) * 30;
     const exact = anchor ? done : (planSpan && planSpan.s === s && planSpan.e === e ? plan : {});
     if (exact.startMin !== undefined && exact.endMin > exact.startMin) { startMin = exact.startMin; endMin = exact.endMin; }
+    if (newRange) { startMin = newRange[0]; endMin = newRange[1]; }
     state.edit = { s, e, startMin, endMin, prev, origPlan: plan.rest };
 
     $('fPlan').value = plan.rest;
@@ -618,8 +661,7 @@
     const ed = state.edit;
     ed.startMin = Math.min(1430, Math.max(0, startMin));
     ed.endMin = Math.min(1440, Math.max(ed.startMin + 10, endMin));
-    ed.s = Math.floor(ed.startMin / 30);
-    ed.e = Math.ceil(ed.endMin / 30) - 1;
+    [ed.s, ed.e] = slotsFor(ed.startMin, ed.endMin);
     fillRange();
   }
 
@@ -726,7 +768,10 @@
   // 先に画面へ反映し、保存結果で上書きする
   function applyLocal(p) {
     const cols = state.day.columns;
-    const cut = (k, s, e) => { cols[k] = cols[k].filter((sp) => sp.e < s || sp.s > e); };
+    // 重なる記録は、範囲より前の部分だけ残す（シート側の writeSpan_ と同じ）
+    const cut = (k, s, e) => {
+      cols[k] = cols[k].flatMap((sp) => (sp.e < s || sp.s > e) ? [sp] : (sp.s < s ? [Object.assign({}, sp, { e: s - 1 })] : []));
+    };
     if (!cols.ans) cols.ans = [];
     ['done', 'feel', 'next', 'ans'].forEach((k) => {
       if (p.prev) cut(k, p.prev.start, p.prev.end);
@@ -801,7 +846,11 @@
   $('grid').addEventListener('click', (ev) => {
     if (Date.now() - lastScrollAt < 350) return; // スクロールを止めたときのタップでは開かない
     const el = ev.target.closest('.blk[data-slot]');
-    if (el) openEditor(Number(el.dataset.slot));
+    if (!el) return;
+    // ブロックの中で押した位置の時間で判断する
+    const row = el.getBoundingClientRect();
+    const rowH = row.height / (Number(el.dataset.len) || 1);
+    openEditor(Number(el.dataset.slot) + Math.max(0, Math.floor((ev.clientY - row.top) / rowH)));
   });
   $('grid').addEventListener('dblclick', (ev) => {
     const el = ev.target.closest('.cell[data-slot]');
@@ -839,7 +888,13 @@
   };
   $('recNow').onclick = () => {
     const today = ymd(new Date());
-    const go = () => openEditor(nowSlot());
+    // 今の時間の新しい記録として開く。直前の記録が今より前に終わっていれば、その終わりから始める
+    const go = () => {
+      const d = new Date(); const now = d.getHours() * 60 + d.getMinutes();
+      const ends = state.day.columns.done.map(exactOf).map((x) => x.endMin).filter((m) => m <= now && m > now - 30);
+      const start = ends.length ? Math.max(...ends) : Math.floor(now / 10) * 10;
+      openEditor(Math.floor(start / 30), { newAt: Math.min(start, 1430) });
+    };
     if (state.date !== today) load(today, { scroll: true }).then(go); else go();
   };
 
@@ -1081,7 +1136,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261009234004';
+  const APP_VERSION = '20261009234346';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
