@@ -207,6 +207,32 @@
   .adj button:active { background: var(--hour); }
   .field { margin-top: 12px; border-radius: 14px; padding: 8px 10px 4px; background: var(--surface-2); border-left: 4px solid; }
   .field.plan { border-color: var(--plan); } .field.done { border-color: var(--done); }
+  .checkbar { display: block; margin: 0 10px 8px; width: calc(100% - 20px); text-align: left; font-size: 12.5px; font-weight: 700; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); color: var(--text); }
+  .checkbar .ok { color: var(--done); }
+  .checkbar small { color: var(--muted); font-weight: 600; margin-left: 6px; }
+  .cp-head { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 8px; }
+  .cp-head b { font-size: 17px; }
+  .cp-head span { margin-left: auto; font-size: 12px; color: var(--keep); font-weight: 700; }
+  .cpi { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-top: 1px solid var(--line); }
+  .cpi .box { flex: none; width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--hour); display: grid; place-items: center; font-weight: 900; color: #fff; }
+  .cpi.on .box { background: var(--done); border-color: var(--done); }
+  .cpi .lb { flex: 1; font-size: 15px; font-weight: 600; }
+  .cpi .lb small { display: block; font-size: 11.5px; color: var(--muted); font-weight: 500; margin-top: 2px; }
+  .cpi input { width: 84px; font-size: 16px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); text-align: right; }
+  .cp-books { margin-top: 12px; padding: 10px 12px; border-radius: 14px; background: var(--plan-bg); }
+  .cp-bhead { display: flex; align-items: center; gap: 8px; }
+  .cp-bhead span { font-weight: 800; color: var(--plan); }
+  .cp-bhead .mini { margin-left: auto; background: var(--surface); color: var(--plan); }
+  .cp-btitles { font-size: 12.5px; color: var(--muted); margin-top: 6px; white-space: pre-wrap; }
+  .cp-bform { display: grid; gap: 8px; margin-top: 10px; }
+  .cp-bform[hidden] { display: none; }
+  .cp-bform input, .cp-bform textarea { width: 100%; font: inherit; font-size: 16px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); resize: none; }
+  .cp-bform .primary { padding: 12px; border-radius: 12px; background: var(--text); color: var(--surface); font-weight: 700; }
+  .cp-note { margin: 2px 0 -2px; font-size: 11.5px; color: var(--muted); }
+  .rmcard { background: var(--surface); border-radius: 18px; padding: 12px 14px; border-left: 5px solid var(--done); }
+  .rmcard h3 { margin: 0 0 6px; font-size: 13px; color: var(--done); }
+  .rmcard div { display: flex; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+  .rmcard div b { flex: none; width: 96px; color: var(--muted); font-size: 11.5px; padding-top: 2px; }
   .planref { display: flex; gap: 8px; align-items: baseline; margin-top: 10px; padding: 8px 12px; border-radius: 12px; background: var(--plan-bg); font-size: 13.5px; line-height: 1.45; }
   .planref b { color: var(--plan); font-size: 11.5px; flex: none; }
   .planref span { white-space: pre-wrap; word-break: break-word; }
@@ -284,6 +310,7 @@
   </div>
   <div class="week day-only" id="week"></div>
   <div class="allday day-only" id="allday"></div>
+  <button class="checkbar day-only" id="checkBar" type="button">今日のチェック</button>
   <div class="cols day-only">
     <div></div>
     <div class="ch plan">予定</div>
@@ -307,6 +334,26 @@
 </nav>
 
 <div class="scrim" id="scrim"></div>
+<section class="editor" id="checkPanel" aria-label="今日のチェック">
+  <div class="grab"></div>
+  <div class="cp-head"><b id="cpTitle">今日のチェック</b><span id="cpStreak"></span></div>
+  <div id="cpItems"></div>
+  <div class="cp-books">
+    <div class="cp-bhead"><b>今月の読書</b><span id="cpBookCount"></span><button class="mini" id="bookOpen" type="button">＋ 読了を記録</button></div>
+    <div class="cp-btitles" id="cpBookTitles"></div>
+    <div class="cp-bform" id="bookForm" hidden>
+      <input id="bTitle" placeholder="書名">
+      <textarea id="bQ" rows="1" placeholder="読む前の問い（この本で知りたかったこと）"></textarea>
+      <p class="cp-note">本を閉じて、見ずに思い出して書く</p>
+      <textarea id="bL1" rows="1" placeholder="学び1"></textarea>
+      <textarea id="bL2" rows="1" placeholder="学び2"></textarea>
+      <textarea id="bL3" rows="1" placeholder="学び3"></textarea>
+      <textarea id="bAct" rows="1" placeholder="明日やること（1つ）"></textarea>
+      <button class="primary" id="bookSave" type="button">読了を保存</button>
+    </div>
+  </div>
+  <div class="actions"><button class="ghost" id="cpClose" type="button" style="flex:1">閉じる</button></div>
+</section>
 <section class="editor" id="editor" aria-label="記録の入力">
   <div class="grab"></div>
   <div class="range">
@@ -469,6 +516,7 @@
     const cached = cacheGet(date);
     if (cached) { state.day = cached; render(); }
     else { state.day = emptyDay(date); render(); }
+    state.checks = cacheGet('c:' + date); renderChecks();
     if (opts.scroll) scrollToNow();
     setBusy(true);
     return call(opts.sync ? 'resyncCalendar' : 'getDay', date).then((day) => {
@@ -483,6 +531,7 @@
         }).catch(() => {});
       }
       if (!opts.prefetched) prefetch(date);
+      if (state.date === date) loadChecks(date);
     }).catch((err) => { if (!(IS_SITE && !API_TOKEN)) toast('読み込みに失敗しました：' + (err && err.message || err)); })
       .finally(() => { if (id === state.reqId) setBusy(false); });
   }
@@ -934,7 +983,87 @@
       y0 = null;
     }, { passive: true });
   })();
-  $('scrim').onclick = closeEditor;
+  /* ---------- 毎日のチェックリスト・読書記録 ---------- */
+  function loadChecks(date) {
+    const c = cacheGet('c:' + date);
+    if (c) { state.checks = c; renderChecks(); }
+    return call('getChecks', date).then((res) => {
+      cacheSet('c:' + date, res);
+      if (state.date === date) { state.checks = res; renderChecks(); }
+    }).catch(() => {});
+  }
+  const itemDone = (it, st) => !!(st && st[it.id]);
+  function renderChecks() {
+    const c = state.checks;
+    if (!c || c.date !== state.date) { $('checkBar').textContent = '今日のチェック'; return; }
+    const n = c.items.filter((it) => itemDone(it, c.state)).length;
+    const all = n === c.items.length;
+    $('checkBar').innerHTML = '<span class="' + (all ? 'ok' : '') + '">' + (all ? '✓ ' : '') + 'チェック ' + n + '/' + c.items.length + '</span>' +
+      '<small>筋トレ 今週' + c.trainWeek + '/5</small><small>本 ' + c.books.count + '/' + c.books.target + '冊</small>' +
+      (c.streak ? '<small>' + c.streak + '日連続</small>' : '');
+    if (!$('checkPanel').classList.contains('on')) return;
+    const d = parse(state.date);
+    $('cpTitle').textContent = (d.getMonth() + 1) + '/' + d.getDate() + '（' + WD[d.getDay()] + '）のチェック';
+    $('cpStreak').textContent = c.streak ? c.streak + '日連続（目安66日）' : '';
+    $('cpItems').innerHTML = c.items.map((it) => {
+      const v = c.state[it.id] || '';
+      const right = it.value ? '<input type="number" inputmode="decimal" step="0.1" data-val="' + it.id + '" value="' + esc(v) + '" placeholder="' + it.value + '">' : '';
+      const extra = it.id === 'train' ? '（今週' + c.trainWeek + '/5）' : '';
+      return '<div class="cpi' + (v ? ' on' : '') + '" data-id="' + it.id + '"><span class="box">' + (v ? '✓' : '') + '</span>' +
+        '<span class="lb">' + esc(it.label) + extra + (it.hint ? '<small>' + esc(it.hint) + '</small>' : '') + '</span>' + right + '</div>';
+    }).join('');
+    $('cpBookCount').textContent = c.books.count + ' / ' + c.books.target + '冊';
+    $('cpBookTitles').textContent = c.books.titles.length ? c.books.titles.map((t) => '・' + t).join('\n') : 'まだ記録がありません';
+  }
+  function setCheckLocal(id, value) {
+    const c = state.checks; if (!c) return;
+    c.state[id] = value === true ? '✓' : value;
+    if (id === 'train') c.trainWeek += value ? 1 : -1;
+    renderChecks();
+    const date = state.date;
+    call('setCheck', date, id, value).then((res) => {
+      cacheSet('c:' + date, res);
+      if (state.date === date) { state.checks = res; renderChecks(); }
+    }).catch((err) => toast('チェックを保存できませんでした：' + (err && err.message || err)));
+  }
+  function openChecks() {
+    $('scrim').classList.add('on');
+    $('checkPanel').classList.add('on');
+    $('bookForm').hidden = true;
+    renderChecks();
+    if (!state.checks || state.checks.date !== state.date) loadChecks(state.date);
+  }
+  function closeChecks() { $('checkPanel').classList.remove('on'); if (!state.edit) $('scrim').classList.remove('on'); }
+  $('checkBar').onclick = openChecks;
+  $('cpClose').onclick = closeChecks;
+  $('cpItems').addEventListener('click', (ev) => {
+    if (ev.target.closest('input')) return;
+    const row = ev.target.closest('.cpi'); if (!row) return;
+    const it = state.checks.items.find((x) => x.id === row.dataset.id);
+    if (it.value) { row.querySelector('input').focus(); return; }
+    setCheckLocal(it.id, state.checks.state[it.id] ? '' : true);
+  });
+  $('cpItems').addEventListener('change', (ev) => {
+    const inp = ev.target.closest('[data-val]'); if (!inp) return;
+    setCheckLocal(inp.dataset.val, inp.value.trim());
+  });
+  $('bookOpen').onclick = () => { $('bookForm').hidden = !$('bookForm').hidden; if (!$('bookForm').hidden) $('bTitle').focus(); };
+  ['bQ', 'bL1', 'bL2', 'bL3', 'bAct'].forEach((id) => $(id).addEventListener('input', (ev) => autoGrow(ev.target)));
+  $('bookSave').onclick = () => {
+    const title = $('bTitle').value.trim();
+    if (!title) { toast('書名を入れてください'); return; }
+    const payload = { date: state.date, title, question: $('bQ').value, l1: $('bL1').value, l2: $('bL2').value, l3: $('bL3').value, action: $('bAct').value };
+    const c = state.checks;
+    if (c) { c.books.count++; c.books.titles.push(title); renderChecks(); }
+    ['bTitle', 'bQ', 'bL1', 'bL2', 'bL3', 'bAct'].forEach((id) => { $(id).value = ''; });
+    $('bookForm').hidden = true;
+    call('addBook', payload).then((bp) => {
+      if (state.checks && state.checks.books.month === bp.month) { state.checks.books = bp; renderChecks(); }
+      toast('読了を記録しました（今月 ' + bp.count + '/' + bp.target + '冊）');
+    }).catch((err) => toast('保存できませんでした：' + (err && err.message || err)));
+  };
+
+  $('scrim').onclick = () => { closeEditor(); closeChecks(); };
   $('closeBtn').onclick = closeEditor;
   $('saveBtn').onclick = save;
   $('delBtn').onclick = remove;
@@ -1040,6 +1169,11 @@
         '<div><small>' + esc(v.label) + '</small><p>' + esc(v.text) + '</p></div>').join('') + '</div>');
     }
     if (g.type === 'week') html.push(valueCardHtml(data.weekValue, g.key));
+    if (data.roadmap && data.roadmap.length) {
+      html.push('<section class="rmcard"><h3>年表（' + (g.type === 'year' ? g.key + '年' : '今月') + '）</h3>' +
+        data.roadmap.map((r) => '<div><b>' + esc(r.label) + '</b><span>' + esc(r.text) + '</span></div>').join('') +
+        (data.books ? '<div><b>読書の進み</b><span>' + data.books.count + ' / ' + data.books.target + '冊</span></div>' : '') + '</section>');
+    }
     if (data.parent && data.parent.goals.length) {
       html.push('<div class="parent"><b>' + (g.type === 'week' ? '今月の目標' : '今年の目標') + '（' + esc(data.parent.label) + '）</b><ul>' +
         data.parent.goals.map((t) => '<li>' + esc(t) + '</li>').join('') + '</ul></div>');
@@ -1111,6 +1245,7 @@
     });
     const clone = (o) => JSON.parse(JSON.stringify(o));
     const goalStore = {};
+    const mockChecks = {};
     const write = (p) => {
       const day = base(p.date);
       const cut = (k, s, e) => { day.columns[k] = day.columns[k].filter((sp) => sp.e < s || sp.s > e); };
@@ -1127,6 +1262,9 @@
       getDay: (d) => clone(base(d)),
       syncDay: () => null,
       processCalendarJobs: () => ({ done: 0, warnings: [], days: {} }),
+      getChecks: (d) => clone(mockChecks[d] || (mockChecks[d] = { date: d, items: [{ id: 'log', label: '時間の記録', when: 'all' }, { id: 'weight', label: '朝の体重', when: 'all', value: 'kg' }, { id: 'protein', label: 'タンパク質100g', when: 'all' }, { id: 'read40', label: '電車で読書（20分＋20分）', when: 'weekday', hint: '電車に乗ったら→本を開く' }, { id: 'train', label: '筋トレ', when: 'train' }], state: {}, trainWeek: 2, streak: 3, books: { month: d.slice(0, 7), count: 1, target: 6, titles: ['サンプルの本'] } })),
+      setCheck: (d, id, v) => { const c = mockChecks[d]; c.state[id] = v === true ? '✓' : v; return clone(c); },
+      addBook: (p) => ({ month: p.date.slice(0, 7), count: 2, target: 6, titles: ['サンプルの本', p.title] }),
       getCalendarStatus: () => ({ pending: 0, oldestMin: 0, lastError: '', hasTrigger: true }),
       getGoals: (type, key) => clone(goalStore[type + key] || { type, key, goals: [
         { goal: type === 'week' ? '（サンプル目標）' : '', result: '', keep: '', problem: '', try: '' }, {}, {}],
@@ -1143,7 +1281,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010061413';
+  const APP_VERSION = '20261010065754';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
