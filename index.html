@@ -475,7 +475,7 @@
         }).catch(() => {});
       }
       if (!opts.prefetched) prefetch(date);
-    }).catch((err) => toast('読み込みに失敗しました：' + (err && err.message || err)))
+    }).catch((err) => { if (!(IS_SITE && !API_TOKEN)) toast('読み込みに失敗しました：' + (err && err.message || err)); })
       .finally(() => { if (id === state.reqId) setBusy(false); });
   }
   // 前後の日を先読みしておく（1回の起動で1日1回まで）
@@ -917,7 +917,7 @@
     return call('getGoals', type, key).then((data) => {
       cacheSet('g:' + type + ':' + key, data);
       if (id === state.reqId && state.goal.key === key && !state.goal.dirty) { state.goal.data = data; renderGoals(); }
-    }).catch((err) => toast('読み込みに失敗しました：' + (err && err.message || err)))
+    }).catch((err) => { if (!(IS_SITE && !API_TOKEN)) toast('読み込みに失敗しました：' + (err && err.message || err)); })
       .finally(() => { if (id === state.reqId) setBusy(false); });
   }
 
