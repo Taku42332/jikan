@@ -378,13 +378,16 @@
   function nowSlot() { const d = new Date(); return Math.floor((d.getHours() * 60 + d.getMinutes()) / 30); }
   function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function minLabel(m) { return Math.floor(m / 60) + ':' + pad(m % 60); }
+  // 終了時刻の表示（24:00を超えたら翌日として「翌0:30」）
+  function endMinLabel(m) { return m > 1440 ? '翌' + minLabel(m - 1440) : minLabel(m); }
+  const MAX_END = 1440 + 6 * 60;
   function durMinText(m) { return (m >= 60 ? Math.floor(m / 60) + '時間' : '') + (m % 60 ? (m % 60) + '分' : ''); }
   // 「9:10〜9:30 本文」の先頭の時刻を読み取る
-  const TIME_RE = /^(\d{1,2}):(\d{2})〜(\d{1,2}):(\d{2})\s+/;
+  const TIME_RE = /^(\d{1,2}):(\d{2})〜(翌)?(\d{1,2}):(\d{2})\s+(（前日の続き）)?/;
   function splitTime(text) {
     const m = String(text || '').match(TIME_RE);
     if (!m || String(text).indexOf('\n') >= 0) return { rest: text || '' };
-    return { startMin: +m[1] * 60 + +m[2], endMin: +m[3] * 60 + +m[4], rest: text.slice(m[0].length) };
+    return { startMin: +m[1] * 60 + +m[2], endMin: (m[3] ? 1440 : 0) + +m[4] * 60 + +m[5], rest: text.slice(m[0].length), cont: !!m[6] };
   }
   function durText(n) { const m = n * 30; return (m >= 60 ? Math.floor(m / 60) + '時間' : '') + (m % 60 ? (m % 60) + '分' : ''); }
 
@@ -577,6 +580,7 @@
   function coverage(st, en, slot) { return Math.max(0, Math.min(en, (slot + 1) * 30) - Math.max(st, slot * 30)); }
   // 正確な時刻 → シート上の枠。15分未満しかかからない端の枠は使わない（隣の記録に譲る）
   function slotsFor(st, en) {
+    en = Math.min(en, 1440); // その日のタブに置く分（翌日分はサーバーが翌日のタブへ書く）
     let s = Math.floor(st / 30), e = Math.ceil(en / 30) - 1;
     if (e > s && coverage(st, en, s) < 15) s++;
     if (e > s && coverage(st, en, e) < 15) e--;
@@ -594,6 +598,14 @@
     let anchor = opts.newAt !== undefined ? null : (spanAt('done', slot) || spanAt('feel', slot) || spanAt('next', slot));
     let newRange = null;
     if (opts.newAt !== undefined) newRange = [opts.newAt, Math.min(1440, opts.newAt + 30)];
+    // 前日から続く記録（翌日側）は、前日の元の記録を開いて編集する
+    if (anchor) {
+      const d0 = spanAt('done', anchor.s);
+      if (d0 && splitTime(d0.text).cont) {
+        load(addDays(state.date, -1)).then(() => openEditor(47));
+        return;
+      }
+    }
     if (anchor) {
       // 記録が15分未満しかかかっていない枠をタップしたら、その記録ではなく空いている時間の新しい記録にする
       const ex = exactOf(anchor);
@@ -660,21 +672,21 @@
   function setRange(startMin, endMin) {
     const ed = state.edit;
     ed.startMin = Math.min(1430, Math.max(0, startMin));
-    ed.endMin = Math.min(1440, Math.max(ed.startMin + 10, endMin));
+    ed.endMin = Math.min(MAX_END, Math.max(ed.startMin + 10, endMin));
     [ed.s, ed.e] = slotsFor(ed.startMin, ed.endMin);
     fillRange();
   }
 
   function fillRange() {
     const ed = state.edit;
-    const opts = (from, to, cur) => {
+    const opts = (from, to, cur, label) => {
       const list = [];
       for (let m = from; m <= to; m += 10) list.push(m);
       if (list.indexOf(cur) < 0) { list.push(cur); list.sort((a, b) => a - b); }
-      return list.map((m) => '<option value="' + m + '"' + (m === cur ? ' selected' : '') + '>' + minLabel(m) + '</option>').join('');
+      return list.map((m) => '<option value="' + m + '"' + (m === cur ? ' selected' : '') + '>' + label(m) + '</option>').join('');
     };
-    $('startSel').innerHTML = opts(0, 1430, ed.startMin);
-    $('endSel').innerHTML = opts(Math.ceil((ed.startMin + 10) / 10) * 10, 1440, ed.endMin);
+    $('startSel').innerHTML = opts(0, 1430, ed.startMin, minLabel);
+    $('endSel').innerHTML = opts(Math.ceil((ed.startMin + 10) / 10) * 10, MAX_END, ed.endMin, endMinLabel);
     const len = ed.endMin - ed.startMin;
     $('durLabel').textContent = durMinText(len);
     $('chips').innerHTML = [30, 60, 90, 120, 180].map((m) =>
@@ -776,8 +788,8 @@
     ['done', 'feel', 'next', 'ans'].forEach((k) => {
       if (p.prev) cut(k, p.prev.start, p.prev.end);
       cut(k, p.start, p.end);
-      const exact = p.startMin !== undefined && (p.startMin % 30 || p.endMin % 30);
-      const text = k === 'done' && exact && p.fields[k] ? minLabel(p.startMin) + '〜' + minLabel(p.endMin) + ' ' + p.fields[k] : p.fields[k];
+      const exact = p.startMin !== undefined && (p.startMin % 30 || p.endMin % 30 || p.endMin > 1440);
+      const text = k === 'done' && exact && p.fields[k] ? minLabel(p.startMin) + '〜' + endMinLabel(p.endMin) + ' ' + p.fields[k] : p.fields[k];
       if (text) cols[k].push({ s: p.start, e: p.end, text });
     });
     if ('plan' in p.fields) {
@@ -1120,7 +1132,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261009234812';
+  const APP_VERSION = '20261010045432';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
