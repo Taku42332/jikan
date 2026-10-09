@@ -1053,6 +1053,24 @@
   })();
 
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+  // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
+  const APP_VERSION = '20261009232654';
+  function checkUpdate() {
+    if (!IS_SITE || APP_VERSION === 'dev') return;
+    fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
+      const m = html.match(/const APP_VERSION = '([^']+)'/);
+      if (!m || m[1] === APP_VERSION) return;
+      const update = () => caches.open('jikan-shell').then((c) => Promise.all([
+        c.put('./', new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })),
+        c.put('./index.html', new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })),
+      ])).catch(() => {}).then(() => location.reload());
+      const wait = () => { if (state.edit) setTimeout(wait, 3000); else update(); };
+      wait();
+    }).catch(() => {});
+  }
+  checkUpdate();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
   loadValues();
   load(state.date, { scroll: true }).then(() => flushOutbox());
 })();

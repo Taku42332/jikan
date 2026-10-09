@@ -1,6 +1,6 @@
 // 画面ファイルを端末に保存し、次回は通信を待たずに即表示する。裏で最新版を取得して次回に反映する。
-// 記録データ（script.google.com）は保存しない。
-const CACHE = 'jikan-shell-v1';
+// 記録データ（script.google.com）は保存しない。?nosw= 付きの確認用リクエストは素通しする。
+const CACHE = 'jikan-shell';
 const SHELL = ['./', './index.html', './icon.png?v=1'];
 
 self.addEventListener('install', event => {
@@ -19,6 +19,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.searchParams.has('nosw')) return;
   event.respondWith(caches.open(CACHE).then(async cache => {
     const cached = await cache.match(event.request, { ignoreSearch: true });
     const network = fetch(event.request)
