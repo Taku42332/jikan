@@ -166,6 +166,20 @@
   .now::before { content: attr(data-t); position: absolute; left: 0; top: -9px; font-size: 10px; font-weight: 700; color: #fff; background: var(--now); padding: 1px 4px; border-radius: 6px; font-variant-numeric: tabular-nums; }
 
   /* ---------- 下部ドック ---------- */
+  .timer { position: fixed; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 7; }
+  .timer button { font: inherit; }
+  .t-start { padding: 10px 16px; border-radius: 999px; background: var(--done); color: #fff; font-weight: 800; font-size: 14px; box-shadow: var(--shadow); }
+  .t-run { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-radius: 999px; background: var(--text); color: var(--surface); box-shadow: var(--shadow); max-width: calc(100vw - 24px); }
+  .t-run[hidden] { display: none; }
+  .t-run .dot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444; flex: none; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .t-name { color: inherit; font-weight: 700; font-size: 14px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-el { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px; }
+  .t-stop { width: 38px; height: 38px; border-radius: 50%; background: #ef4444; color: #fff; font-size: 14px; font-weight: 900; }
+  .t-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .t-chips button { font-size: 13px; padding: 6px 10px; border-radius: 999px; background: var(--plan-bg); color: var(--plan); font-weight: 700; }
+  .setup .t-cancel { background: var(--surface-2); color: var(--muted); }
+  .blk.live { background: repeating-linear-gradient(45deg, var(--done-bg), var(--done-bg) 8px, transparent 8px, transparent 14px); border-left-style: dashed; }
   .dock {
     position: fixed; left: 50%; transform: translateX(-50%);
     bottom: calc(14px + env(safe-area-inset-bottom));
@@ -326,6 +340,23 @@
   <div class="goals goal-only" id="goalView"></div>
 </main>
 
+<div class="timer day-only" id="timer">
+  <button class="t-start" id="timerStart" type="button">▶ スタート</button>
+  <div class="t-run" id="timerRun" hidden>
+    <span class="dot"></span><button class="t-name" id="timerName" type="button"></button>
+    <span class="t-el" id="timerEl">0:00</span>
+    <button class="t-stop" id="timerStop" type="button">■</button>
+  </div>
+</div>
+<div class="setup" id="timerDlg" role="dialog" aria-modal="true">
+  <section>
+    <h2>今やること</h2>
+    <div class="t-chips" id="timerChips"></div>
+    <input id="timerInput" type="text" autocomplete="off" placeholder="例：資料作成">
+    <button id="timerGo" type="button">▶ 計測を始める</button>
+    <button id="timerCancel" type="button" class="t-cancel">やめる</button>
+  </section>
+</div>
 <nav class="dock">
   <button id="goToday">今日</button>
   <button id="sync" class="day-only">予定を同期</button>
@@ -597,6 +628,14 @@
         html.push('<div class="blk ghost" data-slot="' + sp.s + '" style="grid-row:' + (sp.s + 1) + '/' + (sp.e + 2) + ';grid-column:3">＋ 実施を記録</div>');
       }
     });
+    // 計測中の行動を実施の列に描く
+    const tm = state.timer;
+    if (tm && tm.date === state.date) {
+      const now = new Date();
+      const nowMin = state.date === today ? now.getHours() * 60 + now.getMinutes() : 1440;
+      const s0 = Math.floor(tm.startMin / 30), e0 = Math.max(s0, Math.ceil(Math.max(nowMin, tm.startMin + 1) / 30) - 1);
+      html.push('<div class="blk done live" style="grid-row:' + (s0 + 1) + '/' + (Math.min(47, e0) + 2) + ';grid-column:3"><div class="bt">● ' + esc(tm.text) + '</div><div class="bm"><span>' + minLabel(tm.startMin) + '〜 計測中</span></div></div>');
+    }
     if (state.date === today) {
       const now = new Date();
       const mins = now.getHours() * 60 + now.getMinutes();
@@ -1075,6 +1114,84 @@
     }).catch((err) => toast('保存できませんでした：' + (err && err.message || err)));
   };
 
+  /* ---------- 計測（Toggl のようにスタート／ストップで実施を記録） ---------- */
+  const TIMER_KEY = 'jikan-timer-v1';
+  const round10 = (m) => Math.round(m / 10) * 10;
+  function nowParts() { const d = new Date(); return { date: ymd(d), min: d.getHours() * 60 + d.getMinutes(), ms: d.getTime() }; }
+  function saveTimerLocal() { try { state.timer ? localStorage.setItem(TIMER_KEY, JSON.stringify(state.timer)) : localStorage.removeItem(TIMER_KEY); } catch (e) { /* なくても動く */ } }
+  try { state.timer = JSON.parse(localStorage.getItem(TIMER_KEY) || 'null'); } catch (e) { state.timer = null; }
+  function renderTimer() {
+    const tm = state.timer;
+    $('timerStart').hidden = !!tm;
+    $('timerRun').hidden = !tm;
+    if (!tm) return;
+    $('timerName').textContent = tm.text;
+    const sec = Math.max(0, Math.floor((Date.now() - tm.startedAt) / 1000));
+    $('timerEl').textContent = Math.floor(sec / 3600) + ':' + pad(Math.floor(sec / 60) % 60) + ':' + pad(sec % 60);
+  }
+  setInterval(() => { if (state.timer) renderTimer(); }, 1000);
+  function openTimerDlg() {
+    const p = nowParts();
+    const plan = state.date === p.date && state.day ? state.day.columns.plan.find((sp) => sp.s <= Math.floor(p.min / 30) && Math.floor(p.min / 30) <= sp.e) : null;
+    const recent = state.day ? state.day.columns.done.slice(-3).map((sp) => splitTime(sp.text).rest) : [];
+    const chips = [];
+    if (plan) chips.push(splitTime(plan.text).rest);
+    recent.forEach((t) => { if (t && chips.indexOf(t) < 0) chips.push(t); });
+    $('timerChips').innerHTML = chips.slice(0, 4).map((t) => '<button type="button" data-t="' + esc(t) + '">' + esc(t) + '</button>').join('');
+    $('timerInput').value = '';
+    $('timerDlg').classList.add('on');
+    setTimeout(() => $('timerInput').focus(), 50);
+  }
+  function startTimer(text) {
+    text = String(text || '').trim();
+    if (!text) { toast('やることを入れてください'); return; }
+    const p = nowParts();
+    state.timer = { text, date: p.date, startMin: p.min, startedAt: p.ms };
+    saveTimerLocal();
+    $('timerDlg').classList.remove('on');
+    renderTimer(); render();
+    call('setTimer', state.timer).catch(() => {});
+  }
+  function stopTimer() {
+    const tm = state.timer;
+    if (!tm) return;
+    const p = nowParts();
+    // 開始・終了を10分単位に四捨五入。日付をまたいだら翌日の分として扱う（最大翌6:00）
+    const days = Math.round((parse(p.date) - parse(tm.date)) / 86400000);
+    let startMin = round10(tm.startMin);
+    let endMin = round10(p.min + days * 1440);
+    if (startMin >= 1440) startMin = 1430;
+    endMin = Math.min(MAX_END, Math.max(startMin + 10, endMin));
+    state.timer = null;
+    saveTimerLocal();
+    renderTimer();
+    call('setTimer', null).catch(() => {});
+    const [s, e] = slotsFor(startMin, endMin);
+    const payload = { date: tm.date, start: s, end: e, startMin, endMin, fields: { done: tm.text, feel: '', next: '', ans: '' }, prev: null };
+    if (state.date === tm.date && state.day) applyLocal(payload); else render();
+    submit('saveBlock', payload, '記録しました（' + minLabel(startMin) + '〜' + endMinLabel(endMin) + '）ブロックをタップで修正できます');
+  }
+  // 別の端末で始めた計測も引き継ぐ
+  function syncTimer() {
+    call('getTimer').then((tm) => {
+      const local = state.timer;
+      if (JSON.stringify(tm || null) === JSON.stringify(local || null)) return;
+      state.timer = tm || null; saveTimerLocal(); renderTimer(); render();
+    }).catch(() => {});
+  }
+  $('timerStart').onclick = openTimerDlg;
+  $('timerStop').onclick = stopTimer;
+  $('timerName').onclick = () => {
+    const t = prompt('やっていることの名前', state.timer.text);
+    if (t && t.trim()) { state.timer.text = t.trim(); saveTimerLocal(); renderTimer(); render(); call('setTimer', state.timer).catch(() => {}); }
+  };
+  $('timerGo').onclick = () => startTimer($('timerInput').value);
+  $('timerInput').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') startTimer($('timerInput').value); });
+  $('timerChips').addEventListener('click', (ev) => { const b = ev.target.closest('[data-t]'); if (b) startTimer(b.dataset.t); });
+  $('timerCancel').onclick = () => $('timerDlg').classList.remove('on');
+  renderTimer();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncTimer(); });
+
   $('scrim').onclick = () => { closeEditor(); closeChecks(); };
   $('closeBtn').onclick = closeEditor;
   $('saveBtn').onclick = save;
@@ -1258,6 +1375,7 @@
     const clone = (o) => JSON.parse(JSON.stringify(o));
     const goalStore = {};
     const mockChecks = {};
+    let mockTimer = null;
     const write = (p) => {
       const day = base(p.date);
       const cut = (k, s, e) => { day.columns[k] = day.columns[k].filter((sp) => sp.e < s || sp.s > e); };
@@ -1277,6 +1395,8 @@
       getChecks: (d) => clone(mockChecks[d] || (mockChecks[d] = { date: d, items: [{ id: 'log', label: '時間の記録', when: 'all' }, { id: 'weight', label: '朝の体重', when: 'all', value: 'kg' }, { id: 'protein', label: 'タンパク質100g', when: 'all' }, { id: 'read40', label: '電車で読書（20分＋20分）', when: 'weekday', hint: '電車に乗ったら→本を開く' }, { id: 'train', label: '筋トレ', when: 'train' }], state: {}, trainWeek: 2, streak: 3, books: { month: d.slice(0, 7), count: 1, target: 6, titles: ['サンプルの本'] } })),
       setCheck: (d, id, v) => { const c = mockChecks[d]; c.state[id] = v === true ? '✓' : v; return clone(c); },
       addBook: (p) => ({ month: p.date.slice(0, 7), count: 2, target: 6, titles: ['サンプルの本', p.title] }),
+      getTimer: () => mockTimer,
+      setTimer: (t) => { mockTimer = t; return t; },
       getCalendarStatus: () => ({ pending: 0, oldestMin: 0, lastError: '', hasTrigger: true }),
       getGoals: (type, key) => clone(goalStore[type + key] || { type, key, goals: [
         { goal: type === 'week' ? '（サンプル目標）' : '', result: '', keep: '', problem: '', try: '' }, {}, {}],
@@ -1293,7 +1413,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010194210';
+  const APP_VERSION = '20261010195253';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
@@ -1310,7 +1430,7 @@
   checkUpdate();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
   loadValues();
-  load(state.date, { scroll: true }).then(() => flushOutbox()).then(() => checkCalendarStatus());
+  load(state.date, { scroll: true }).then(() => flushOutbox()).then(() => checkCalendarStatus()).then(() => syncTimer());
 })();
 </script>
 </body>
