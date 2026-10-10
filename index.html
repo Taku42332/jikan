@@ -965,12 +965,11 @@
     load(state.date, { scroll: true });
     loadValues();
   };
-  // 入力シートを下にスワイプして閉じる（先頭までスクロールしているときだけ）
-  (() => {
-    const ed = $('editor');
+  // 下から出る画面（入力・チェック）を下にスワイプして閉じる（先頭までスクロールしているときだけ）
+  function swipeToClose(ed, close) {
     let y0 = null, dy = 0;
     ed.addEventListener('touchstart', (ev) => {
-      if (ed.scrollTop > 0 || ev.target.closest('textarea, select')) { y0 = null; return; }
+      if (ed.scrollTop > 0 || ev.target.closest('textarea, select, input')) { y0 = null; return; }
       y0 = ev.touches[0].clientY; dy = 0;
     }, { passive: true });
     ed.addEventListener('touchmove', (ev) => {
@@ -982,10 +981,11 @@
       if (y0 === null) return;
       ed.classList.remove('dragging');
       ed.style.transform = '';
-      if (dy > 90) closeEditor();
+      if (dy > 90) close();
       y0 = null;
     }, { passive: true });
-  })();
+  }
+  swipeToClose($('editor'), closeEditor);
   /* ---------- 毎日のチェックリスト・読書記録 ---------- */
   function loadChecks(date) {
     const c = cacheGet('c:' + date);
@@ -1038,6 +1038,7 @@
   }
   function closeChecks() { $('checkPanel').classList.remove('on'); if (!state.edit) $('scrim').classList.remove('on'); }
   $('checkBar').onclick = openChecks;
+  swipeToClose($('checkPanel'), closeChecks);
   $('cpClose').onclick = closeChecks;
   $('cpItems').addEventListener('click', (ev) => {
     if (ev.target.closest('input')) return;
@@ -1284,7 +1285,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010114609';
+  const APP_VERSION = '20261010144556';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
