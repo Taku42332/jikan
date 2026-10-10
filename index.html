@@ -399,7 +399,7 @@
 <div class="setup" id="setup" role="dialog" aria-modal="true">
   <section>
     <h2>はじめの設定</h2>
-    <p id="setupMsg">PCでスプレッドシート「時間管理」を開き、メニュー「時間管理 → スマホアプリの設定QRを表示」のQRを読み取ってください。リンクを貼り付けても設定できます。</p>
+    <p id="setupMsg">PCでスプレッドシート「時間管理」を開き、メニュー「時間管理 → スマホアプリの設定QRを表示」のQRを読み取ってください。リンク（https://taku42332.github.io/jikan/?t= で始まるもの）を貼り付けても設定できます。スプレッドシートのURLではありません。</p>
     <input id="setupInput" type="text" autocomplete="off" placeholder="設定リンクを貼り付け">
     <button id="setupSave" type="button">設定する</button>
   </section>
@@ -955,7 +955,7 @@
 
   $('setupSave').onclick = () => {
     const t = tokenFromText($('setupInput').value);
-    if (!t) { $('setupMsg').textContent = '設定リンクの形式が正しくありません。QRから開いたリンクをそのまま貼り付けてください。'; return; }
+    if (!t) { $('setupMsg').textContent = ($('setupInput').value.indexOf('docs.google.com') >= 0 ? 'これはスプレッドシートのURLです。' : '設定リンクの形式が正しくありません。') + 'メニュー「スマホアプリの設定QRを表示」の「PCでリンクを開く」のリンク（https://taku42332.github.io/jikan/?t= で始まるもの）を貼り付けてください。'; return; }
     try { localStorage.setItem(TOKEN_KEY, t); } catch (e) { /* 保存できなくても今回は使える */ }
     API_TOKEN = t;
     $('setup').classList.remove('on');
@@ -1281,7 +1281,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010065754';
+  const APP_VERSION = '20261010092550';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
