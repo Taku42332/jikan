@@ -475,8 +475,7 @@
       if (fromUrl) localStorage.setItem(TOKEN_KEY, fromUrl);
       API_TOKEN = fromUrl || localStorage.getItem(TOKEN_KEY) || '';
     } catch (e) { API_TOKEN = fromUrl; }
-    // 合言葉をアドレス欄に残さない
-    if (fromUrl) history.replaceState(null, '', location.pathname);
+    // 合言葉はアドレス欄に残す（iPhoneの「ホーム画面に追加」は今のURLで追加されるため。消すと追加したアプリに合言葉が渡らない）
   }
   function showSetup(msg) {
     if (msg) $('setupMsg').textContent = msg;
@@ -1281,7 +1280,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010092550';
+  const APP_VERSION = '20261010092926';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
