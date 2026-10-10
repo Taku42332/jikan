@@ -999,6 +999,11 @@
   function renderChecks() {
     const c = state.checks;
     if (!c || c.date !== state.date) { $('checkBar').textContent = '今日のチェック'; return; }
+    if (!c.items.length) {
+      $('checkBar').innerHTML = '<span>今日のチェックはお休み</span><small>本 ' + c.books.count + '/' + c.books.target + '冊</small>';
+      if ($('checkPanel').classList.contains('on')) $('cpItems').innerHTML = '<p class="cp-note" style="padding:8px 4px">この日は毎日のチェックの対象外です。</p>';
+      return;
+    }
     const n = c.items.filter((it) => itemDone(it, c.state)).length;
     const all = n === c.items.length;
     $('checkBar').innerHTML = '<span class="' + (all ? 'ok' : '') + '">' + (all ? '✓ ' : '') + 'チェック ' + n + '/' + c.items.length + '</span>' +
@@ -1285,7 +1290,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010144556';
+  const APP_VERSION = '20261010182708';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
