@@ -475,7 +475,9 @@
       if (fromUrl) localStorage.setItem(TOKEN_KEY, fromUrl);
       API_TOKEN = fromUrl || localStorage.getItem(TOKEN_KEY) || '';
     } catch (e) { API_TOKEN = fromUrl; }
-    // 合言葉はアドレス欄に残す（iPhoneの「ホーム画面に追加」は今のURLで追加されるため。消すと追加したアプリに合言葉が渡らない）
+    // 合言葉は必ずアドレス欄にも付けておく（iPhoneの「ホーム画面に追加」は今のURLで追加されるため。
+    // 付いていないと、追加したアプリに合言葉が渡らない。Safariとホーム画面のアプリは保存場所が別）
+    if (API_TOKEN && !fromUrl) history.replaceState(null, '', location.pathname + '?t=' + API_TOKEN);
   }
   function showSetup(msg) {
     if (msg) $('setupMsg').textContent = msg;
@@ -957,7 +959,9 @@
     if (!t) { $('setupMsg').textContent = ($('setupInput').value.indexOf('docs.google.com') >= 0 ? 'これはスプレッドシートのURLです。' : '設定リンクの形式が正しくありません。') + 'メニュー「スマホアプリの設定QRを表示」の「PCでリンクを開く」のリンク（https://taku42332.github.io/jikan/?t= で始まるもの）を貼り付けてください。'; return; }
     try { localStorage.setItem(TOKEN_KEY, t); } catch (e) { /* 保存できなくても今回は使える */ }
     API_TOKEN = t;
+    history.replaceState(null, '', location.pathname + '?t=' + t);
     $('setup').classList.remove('on');
+    toast('設定しました。ホーム画面に追加するのは、この画面からにしてください');
     load(state.date, { scroll: true });
     loadValues();
   };
@@ -1280,7 +1284,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261010092926';
+  const APP_VERSION = '20261010114609';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
