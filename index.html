@@ -260,6 +260,9 @@
   .planref b { color: var(--plan); font-size: 11.5px; flex: none; }
   .planref span { white-space: pre-wrap; word-break: break-word; }
   .planref[hidden] { display: none; }
+  .plan-start { width: 100%; min-height: 44px; margin-top: 8px; border: 0; border-radius: 12px; background: #168047; color: white; font: inherit; font-weight: 700; }
+  .plan-start[hidden] { display: none; }
+  .plan-start:disabled { opacity: .5; }
   .field.ans { border-color: var(--keep); padding-bottom: 8px; }
   .field.ans label { color: var(--keep); }
   .tag.ans-tag { background: var(--keep-bg); }
@@ -411,6 +414,7 @@
 
   <!-- 予定はカレンダーから自動で入るので入力欄は出さず、参考として表示だけする -->
   <div class="planref" id="planRef"><b>予定</b><span id="planRefText"></span></div>
+  <button class="plan-start" id="startPlanned" type="button" hidden>▶ 今から始める</button>
   <textarea id="fPlan" hidden></textarea>
   <div class="field done">
     <label>実施 <span class="tag done-tag">カレンダーに反映</span><button class="mini" id="asPlanned" type="button">予定どおり</button></label>
@@ -776,6 +780,9 @@
     // 予定は表示だけ（変更はカレンダー側で行う）
     $('planRef').hidden = !plan.rest;
     $('planRefText').textContent = plan.rest;
+    $('startPlanned').hidden = !state.edit.planRef || plan.rest.indexOf('\n') >= 0 || state.date !== ymd(new Date());
+    $('startPlanned').disabled = !!state.timer;
+    $('startPlanned').textContent = state.timer ? '計測中です（先に停止してください）' : '▶ 今から始める';
     $('asPlanned').style.display = plan.rest ? '' : 'none';
     $('delBtn').style.display = prev ? '' : 'none';
 
@@ -941,7 +948,7 @@
   function submit(fn, payload, msg) {
     payload.id = payload.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     outboxWrite(outboxRead().concat([{ fn, payload }]));
-    send(fn, payload, msg);
+    return send(fn, payload, msg);
   }
 
   function send(fn, payload, msg) {
@@ -1199,6 +1206,7 @@
     setTimeout(() => $('timerInput').focus(), 50);
   }
   function startTimer(text) {
+    if (state.timer) { toast('計測中の記録を先に停止してください'); return; }
     text = String(text || '').trim();
     if (!text) { toast('やることを入れてください'); return; }
     const p = nowParts();
@@ -1208,28 +1216,52 @@
     renderTimer(); render();
     call('setTimer', state.timer).catch(() => {});
   }
+  let plannedStartPromise = Promise.resolve();
+  function startPlannedTimer() {
+    const ed = state.edit;
+    if (!ed || !ed.planRef || state.timer) return;
+    const p = nowParts(), ref = ed.planRef;
+    if (state.date !== p.date) { toast('今日の予定から開始してください'); return; }
+    const duration = ref.endMin - ref.startMin;
+    if (duration <= 0 || p.min + duration > MAX_END) { toast('終了時刻が翌朝6時を超えます。予定の長さを調整してください'); return; }
+    const id = 'pt' + p.ms.toString(36) + Math.random().toString(36).slice(2, 8);
+    state.timer = { text: splitTime(ref.text).rest, date: p.date, startMin: p.min, startedAt: p.ms, planTimerId: id };
+    saveTimerLocal();
+    const timer = Object.assign({}, state.timer);
+    const payload = { id, date: p.date, planRef: ref, startMin: p.min, endMin: p.min + duration, beginTimer: timer };
+    const plan = state.day.columns.plan.find(sp => sp.s === ref.s && sp.e === ref.e && sp.text === ref.text);
+    if (plan) { [plan.s, plan.e] = slotsFor(payload.startMin, payload.endMin); plan.text = minLabel(payload.startMin) + '〜' + endMinLabel(payload.endMin) + ' ' + timer.text; }
+    closeEditor(); renderTimer(); render();
+    plannedStartPromise = submit('savePlanTime', payload, '予定を今の時刻に移動して計測を始めました');
+  }
+  $('startPlanned').onclick = startPlannedTimer;
   function stopTimer() {
     const tm = state.timer;
     if (!tm) return;
     const p = nowParts();
     // 開始・終了を10分単位に四捨五入。日付をまたいだら翌日の分として扱う（最大翌6:00）
     const days = Math.round((parse(p.date) - parse(tm.date)) / 86400000);
-    let startMin = round10(tm.startMin);
+    let startMin = tm.planTimerId ? tm.startMin : round10(tm.startMin);
     let endMin = round10(p.min + days * 1440);
     if (startMin >= 1440) startMin = 1430;
     endMin = Math.min(MAX_END, Math.max(startMin + 10, endMin));
     state.timer = null;
     saveTimerLocal();
     renderTimer();
-    call('setTimer', null).catch(() => {});
     const [s, e] = slotsFor(startMin, endMin);
     const payload = { date: tm.date, start: s, end: e, startMin, endMin, fields: { done: tm.text, feel: '', next: '', ans: '' }, prev: null };
+    if (tm.planTimerId) payload.planTimerId = tm.planTimerId;
     if (state.date === tm.date && state.day) applyLocal(payload); else render();
-    submit('saveBlock', payload, '記録しました（' + minLabel(startMin) + '〜' + endMinLabel(endMin) + '）ブロックをタップで修正できます');
+    const saveStopped = () => {
+      call('setTimer', null, tm.planTimerId || null).catch(() => {});
+      return submit('saveBlock', payload, '記録しました（' + minLabel(startMin) + '〜' + endMinLabel(endMin) + '）ブロックをタップで修正できます');
+    };
+    if (tm.planTimerId) plannedStartPromise.then(saveStopped); else saveStopped();
   }
   // 別の端末で始めた計測も引き継ぐ
   function syncTimer() {
     call('getTimer').then((tm) => {
+      if (outboxRead().some(x => x.payload.beginTimer || x.payload.planTimerId)) return;
       const local = state.timer;
       if (JSON.stringify(tm || null) === JSON.stringify(local || null)) return;
       state.timer = tm || null; saveTimerLocal(); renderTimer(); render();
@@ -1450,6 +1482,7 @@
       savePlanTime: (p) => {
         const day = base(p.date); const old = day.columns.plan.find(sp => sp.s === p.planRef.s && sp.e === p.planRef.e && sp.text === p.planRef.text);
         if (old) { [old.s, old.e] = slotsFor(p.startMin, p.endMin); old.text = minLabel(p.startMin) + '〜' + endMinLabel(p.endMin) + ' ' + splitTime(old.text).rest; }
+        if (p.beginTimer) mockTimer = clone(p.beginTimer);
         return clone(day);
       },
       syncDay: () => null,
@@ -1475,7 +1508,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261011215051';
+  const APP_VERSION = '20261011220509';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
