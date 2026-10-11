@@ -209,7 +209,7 @@
     transform: translateY(105%); transition: transform .25s cubic-bezier(.2,.8,.2,1);
   }
   .editor.on { transform: none; }
-  .grab { width: 38px; height: 5px; border-radius: 3px; background: var(--hour); margin: 0 auto 10px; box-shadow: 0 0 0 14px transparent; }
+  .grab { width: 38px; height: 5px; border-radius: 3px; background: var(--hour); margin: 0 auto 10px; box-shadow: 0 0 0 14px transparent; touch-action: none; }
   .editor.dragging { transition: none; }
   .range { display: flex; align-items: center; gap: 8px; }
   .range select {
@@ -755,6 +755,7 @@
     else { s = e = slot; }
 
     const val = (k) => { if (newRange && k !== 'plan') return ''; const sp = spanAt(k, s); return sp ? sp.text : ''; };
+    const planSpan = spanAt('plan', s);
     const done = splitTime(val('done'));
     const plan = splitTime(val('plan'));
     // 空き枠はタップした30分。既存の実施だけ、保存済みの正確な時刻を引き継ぐ。
@@ -762,7 +763,8 @@
     const exact = anchor ? done : {};
     if (exact.startMin !== undefined && exact.endMin > exact.startMin) { startMin = exact.startMin; endMin = exact.endMin; }
     if (newRange) { startMin = newRange[0]; endMin = newRange[1]; }
-    state.edit = { s, e, startMin, endMin, prev, origPlan: plan.rest };
+    state.edit = { s, e, startMin, endMin, prev, origPlan: plan.rest, originalStartMin: startMin, originalEndMin: endMin,
+      planRef: planSpan && planSpan.cal ? Object.assign({}, planSpan, exactOf(planSpan)) : null };
 
     $('fPlan').value = plan.rest;
     $('fDone').value = done.rest;
@@ -884,6 +886,14 @@
     const plan = $('fPlan').value.trim();
     const planChanged = plan !== ed.origPlan;
     if (planChanged) fields.plan = plan;
+    const timeChanged = ed.startMin !== ed.originalStartMin || ed.endMin !== ed.originalEndMin;
+    if (!ed.prev && !fields.done && !fields.feel && !fields.next && !fields.ans && timeChanged && ed.planRef) {
+      if (ed.planRef.text.indexOf('\n') >= 0) { toast('複数の予定が重なっています。カレンダーで1件を選んで変更してください'); return; }
+      const payload = { date: state.date, startMin: ed.startMin, endMin: ed.endMin, planRef: ed.planRef };
+      closeEditor();
+      submit('savePlanTime', payload, 'カレンダーの時刻を更新しました');
+      return;
+    }
     // 予定が無い時間の実施は、サーバー側でシートの予定欄にだけ写す（カレンダーへは送らない）
     if (!ed.prev && !fields.done && !fields.feel && !fields.next && !fields.ans && !planChanged) { closeEditor(); return; }
 
@@ -1043,23 +1053,31 @@
   };
   // 下から出る画面（入力・チェック）を下にスワイプして閉じる（先頭までスクロールしているときだけ）
   function swipeToClose(ed, close) {
-    let y0 = null, dy = 0;
+    let y0 = null, x0 = 0, dy = 0, began = 0, dragging = false;
+    const reset = () => { y0 = null; dy = 0; dragging = false; ed.classList.remove('dragging'); ed.style.transform = ''; };
     ed.addEventListener('touchstart', (ev) => {
-      if (ed.scrollTop > 0 || ev.target.closest('textarea, select, input')) { y0 = null; return; }
-      y0 = ev.touches[0].clientY; dy = 0;
+      if (ev.touches.length !== 1 || (ed.scrollTop > 1 && !ev.target.closest('.grab')) || ev.target.closest('textarea, select, input')) { y0 = null; return; }
+      y0 = ev.touches[0].clientY; x0 = ev.touches[0].clientX; dy = 0; began = Date.now(); dragging = false;
     }, { passive: true });
     ed.addEventListener('touchmove', (ev) => {
       if (y0 === null) return;
       dy = ev.touches[0].clientY - y0;
-      if (dy > 0) { ed.classList.add('dragging'); ed.style.transform = 'translateY(' + dy + 'px)'; }
-    }, { passive: true });
+      const dx = Math.abs(ev.touches[0].clientX - x0);
+      if (!dragging && (dy < -8 || dx > Math.max(12, dy))) { y0 = null; return; }
+      if (dy > 8) dragging = true;
+      if (dragging) {
+        if (ev.cancelable) ev.preventDefault();
+        ed.classList.add('dragging'); ed.style.transform = 'translateY(' + Math.max(0, dy) + 'px)';
+      }
+    }, { passive: false });
     ed.addEventListener('touchend', () => {
       if (y0 === null) return;
-      ed.classList.remove('dragging');
-      ed.style.transform = '';
-      if (dy > 90) close();
-      y0 = null;
+      const shouldClose = dragging && (dy >= 48 || (dy >= 24 && dy / Math.max(1, Date.now() - began) >= 0.35));
+      // 閉じるクラスを先に外し、元の位置へ戻る反動を挟まず退場する。
+      if (shouldClose) close();
+      reset();
     }, { passive: true });
+    ed.addEventListener('touchcancel', reset, { passive: true });
   }
   swipeToClose($('editor'), closeEditor);
   /* ---------- 毎日のチェックリスト・読書記録 ---------- */
@@ -1429,6 +1447,11 @@
     return {
       getValues: () => ({ values: [{ name: 'サンプルA', items: [{ name: '行動項目1', steps: ['段階1', '段階2', '段階3', '段階4', '段階5', '段階6'] }, { name: '行動項目2', steps: ['段階1', '段階2', '段階3', '段階4', '段階5', '段階6'] }] }, { name: 'サンプルB', items: [{ name: '行動項目3', steps: ['段階1', '段階2', '段階3', '段階4', '段階5', '段階6'] }] }], start: '2026-10-12' }),
       getDay: (d) => clone(base(d)),
+      savePlanTime: (p) => {
+        const day = base(p.date); const old = day.columns.plan.find(sp => sp.s === p.planRef.s && sp.e === p.planRef.e && sp.text === p.planRef.text);
+        if (old) { [old.s, old.e] = slotsFor(p.startMin, p.endMin); old.text = minLabel(p.startMin) + '〜' + endMinLabel(p.endMin) + ' ' + splitTime(old.text).rest; }
+        return clone(day);
+      },
       syncDay: () => null,
       processCalendarJobs: () => ({ done: 0, warnings: [], days: {} }),
       getChecks: (d) => clone(mockChecks[d] || (mockChecks[d] = { date: d, items: [{ id: 'log', label: '時間の記録', when: 'all' }, { id: 'weight', label: '朝の体重', when: 'all', value: 'kg' }, { id: 'protein', label: 'タンパク質100g', when: 'all' }, { id: 'read40', label: '電車で読書（20分＋20分）', when: 'weekday', hint: '電車に乗ったら→本を開く' }, { id: 'train', label: '筋トレ', when: 'train' }], state: {}, trainWeek: 2, streak: 3, books: { month: d.slice(0, 7), count: 1, target: 6, titles: ['サンプルの本'] } })),
@@ -1452,7 +1475,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261011170503';
+  const APP_VERSION = '20261011214939';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
