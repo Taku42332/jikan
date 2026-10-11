@@ -12,6 +12,13 @@
 <link rel="apple-touch-icon" href="icon.png?v=1">
 <link rel="icon" href="icon.png?v=1">
 <style>
+.reading-progress { margin:4px 12px 6px; padding:10px 12px; border-radius:14px; background:#edf6f3; color:#166349; }
+.reading-progress .rp-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; font-size:12px; }
+.reading-progress .rp-head strong { font-size:19px; font-variant-numeric:tabular-nums; }
+.reading-progress .rp-track { height:7px; margin-top:7px; background:#d4e7df; border-radius:9px; overflow:hidden; }
+.reading-progress .rp-fill { height:100%; background:#20865d; border-radius:9px; transition:width .25s; }
+.reading-progress .rp-foot { margin-top:5px; font-size:10px; color:#526f63; }
+
 .adj { flex-direction:column; align-items:flex-start; } .adj > div { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
   :root {
     --bg: #f3f4f6;
@@ -326,6 +333,7 @@
   </div>
   <div class="week day-only" id="week"></div>
   <div class="allday day-only" id="allday"></div>
+  <section class="reading-progress day-only" id="readingProgress" aria-label="読書の進捗"></section>
   <button class="checkbar day-only" id="checkBar" type="button">今日のチェック</button>
   <div class="cols day-only">
     <div></div>
@@ -592,6 +600,7 @@
     const diff = Math.round((d - parse(today)) / 86400000);
     $('subLabel').textContent = diff === 0 ? '今日' : diff === -1 ? '昨日' : diff === 1 ? '明日' : d.getFullYear() + '年';
     $('datePick').value = state.date;
+    renderReadingProgress();
     renderWeek(today);
     $('allday').innerHTML = (day.allDay || []).map((t) => '<span class="pill">終日 ' + esc(t) + '</span>').join('');
 
@@ -681,6 +690,33 @@
   function exactOf(sp) {
     const t = splitTime(sp.text);
     return t.startMin !== undefined && t.endMin > t.startMin ? t : { startMin: sp.s * 30, endMin: (sp.e + 1) * 30 };
+  }
+
+  // 予定は数えず、実施と計測中の読書を日付内で合算。重なる時間は1回だけ数える。
+  function readingMinutes(day, timer, date, nowMs) {
+    const isReading = text => /読書|本を読む/.test(splitTime(text).rest);
+    const ranges = ((day && day.date === date && day.columns.done) || []).filter(sp => isReading(sp.text)).map(exactOf).map(x => [Math.max(0,x.startMin), Math.min(1440,x.endMin)]);
+    if (timer && isReading(timer.text) && Number.isFinite(Number(timer.startedAt))) {
+      const midnight = parse(date).getTime();
+      const from = Math.max(Number(timer.startedAt), midnight), to = Math.min(nowMs, parse(addDays(date,1)).getTime());
+      if (to > from) ranges.push([(from-midnight)/60000,(to-midnight)/60000]);
+    }
+    ranges.sort((a,b) => a[0]-b[0]);
+    let total=0, end=-1;
+    ranges.forEach(([s,e]) => { if(e>s) { total += Math.max(0,e-Math.max(s,end)); end=Math.max(end,e); } });
+    return Math.floor(total);
+  }
+  function renderReadingProgress() {
+    const el=$('readingProgress'); if(!el) return;
+    const c=state.checks && state.checks.date===state.date ? state.checks : null;
+    const target=c ? (c.readingTargetMin !== undefined ? Number(c.readingTargetMin) : c.items.some(it=>it.id==='read120') ? 120 : c.items.some(it=>it.id==='read40') ? 40 : 0) : null;
+    const minutes=readingMinutes(state.day,state.timer,state.date,Date.now());
+    const remaining=target===null ? null : Math.max(0,target-minutes);
+    const percent=target>0 ? Math.min(100,minutes/target*100) : 0;
+    const running=state.timer && /読書|本を読む/.test(state.timer.text) && Number(state.timer.startedAt) < parse(addDays(state.date,1)).getTime() && Date.now()>parse(state.date).getTime();
+    el.innerHTML='<div class="rp-head"><span>読書 <strong>'+minutes+'分</strong> / '+(target===null ? '目標読込中' : '目標'+target+'分')+'</span><b>'+(target===null ? '—' : target===0 ? '目標なし' : remaining===0 ? '✓ 達成' : 'あと'+remaining+'分')+'</b></div>'+
+      '<div class="rp-track" role="progressbar" aria-label="読書の達成率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(percent)+'"><div class="rp-fill" style="width:'+percent+'%"></div></div>'+
+      '<div class="rp-foot">実施の「読書」「本を読む」を自動集計'+(running?' · 計測中も加算':'')+'</div>';
   }
 
   // opts.newAt: 指定した分から始まる新しい記録として開く
@@ -1038,6 +1074,7 @@
   }
   const itemDone = (it, st) => !!(st && st[it.id]);
   function renderChecks() {
+    renderReadingProgress();
     const c = state.checks;
     if (!c || c.date !== state.date) { $('checkBar').textContent = '今日のチェック'; return; }
     if (!c.items.length) {
@@ -1122,6 +1159,7 @@
   function saveTimerLocal() { try { state.timer ? localStorage.setItem(TIMER_KEY, JSON.stringify(state.timer)) : localStorage.removeItem(TIMER_KEY); } catch (e) { /* なくても動く */ } }
   try { state.timer = JSON.parse(localStorage.getItem(TIMER_KEY) || 'null'); } catch (e) { state.timer = null; }
   function renderTimer() {
+    renderReadingProgress();
     const tm = state.timer;
     $('timerStart').hidden = !!tm;
     $('timerRun').hidden = !tm;
@@ -1415,7 +1453,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261011165144';
+  const APP_VERSION = '20261011165924';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
