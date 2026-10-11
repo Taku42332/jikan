@@ -635,7 +635,7 @@
       const finished = isPastDay || (state.date === today && sp.e < ns);
       const recorded = day.columns.done.some((d) => d.s <= sp.e && sp.s <= d.e);
       if (finished && !recorded) {
-        html.push('<div class="blk ghost" data-slot="' + sp.s + '" style="grid-row:' + (sp.s + 1) + '/' + (sp.e + 2) + ';grid-column:3">＋ 実施を記録</div>');
+        html.push('<div class="blk ghost" data-slot="' + sp.s + '" data-len="' + (sp.e - sp.s + 1) + '" style="grid-row:' + (sp.s + 1) + '/' + (sp.e + 2) + ';grid-column:3">＋ 実施を記録</div>');
       }
     });
     // 計測中の行動を実施の列に描く
@@ -752,15 +752,14 @@
     let s, e, prev = null;
     if (newRange) { [s, e] = slotsFor(newRange[0], newRange[1]); }
     else if (anchor) { s = anchor.s; e = anchor.e; prev = { start: s, end: e }; }
-    else { const p = spanAt('plan', slot); if (p) { s = p.s; e = p.e; } else { s = e = slot; } }
+    else { s = e = slot; }
 
     const val = (k) => { if (newRange && k !== 'plan') return ''; const sp = spanAt(k, s); return sp ? sp.text : ''; };
-    const planSpan = spanAt('plan', s);
     const done = splitTime(val('done'));
     const plan = splitTime(val('plan'));
-    // 正確な時刻：実施の記録 → 予定（単独の予定のとき）→ 30分枠 の順に採用
+    // 空き枠はタップした30分。既存の実施だけ、保存済みの正確な時刻を引き継ぐ。
     let startMin = s * 30, endMin = (e + 1) * 30;
-    const exact = anchor ? done : (planSpan && planSpan.s === s && planSpan.e === e ? plan : {});
+    const exact = anchor ? done : {};
     if (exact.startMin !== undefined && exact.endMin > exact.startMin) { startMin = exact.startMin; endMin = exact.endMin; }
     if (newRange) { startMin = newRange[0]; endMin = newRange[1]; }
     state.edit = { s, e, startMin, endMin, prev, origPlan: plan.rest };
@@ -1002,7 +1001,7 @@
     // ブロックの中で押した位置の時間で判断する
     const row = el.getBoundingClientRect();
     const rowH = row.height / (Number(el.dataset.len) || 1);
-    openEditor(Number(el.dataset.slot) + Math.max(0, Math.floor((ev.clientY - row.top) / rowH)));
+    openEditor(Number(el.dataset.slot) + Math.min((Number(el.dataset.len) || 1) - 1, Math.max(0, Math.floor((ev.clientY - row.top) / rowH))));
   });
   let lastScrollAt = 0;
   $('scroller').addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
@@ -1453,7 +1452,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261011165924';
+  const APP_VERSION = '20261011170503';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
