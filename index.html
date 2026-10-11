@@ -12,6 +12,7 @@
 <link rel="apple-touch-icon" href="icon.png?v=1">
 <link rel="icon" href="icon.png?v=1">
 <style>
+.adj { flex-direction:column; align-items:flex-start; } .adj > div { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
   :root {
     --bg: #f3f4f6;
     --surface: #ffffff;
@@ -396,15 +397,15 @@
   </div>
   <div class="chips" id="chips"></div>
   <div class="adj" id="adj">
-    <span>開始</span><button type="button" data-adj="start:-10">−10分</button><button type="button" data-adj="start:10">＋10分</button>
-    <span class="gap">終了</span><button type="button" data-adj="end:-10">−10分</button><button type="button" data-adj="end:10">＋10分</button>
+    <div><span>開始</span><button type="button" data-adj="start:-20">−20分</button><button type="button" data-adj="start:-10">−10分</button><button type="button" data-adj="start:10">＋10分</button><button type="button" data-adj="start:20">＋20分</button></div>
+    <div><span>終了</span><button type="button" data-adj="end:-20">−20分</button><button type="button" data-adj="end:-10">−10分</button><button type="button" data-adj="end:10">＋10分</button><button type="button" data-adj="end:20">＋20分</button><button type="button" id="endNow">今終了</button></div>
   </div>
 
   <!-- 予定はカレンダーから自動で入るので入力欄は出さず、参考として表示だけする -->
   <div class="planref" id="planRef"><b>予定</b><span id="planRefText"></span></div>
   <textarea id="fPlan" hidden></textarea>
   <div class="field done">
-    <label>実施 <span class="tag done-tag">実施カレンダーに登録</span><button class="mini" id="asPlanned" type="button">予定どおり</button></label>
+    <label>実施 <span class="tag done-tag">カレンダーに反映</span><button class="mini" id="asPlanned" type="button">予定どおり</button></label>
     <textarea id="fDone" rows="1" placeholder="実際にやったこと"></textarea>
   </div>
   <div class="field feel">
@@ -1199,9 +1200,10 @@
   $('asPlanned').onclick = () => { $('fDone').value = splitTime($('fPlan').value).rest; autoGrow($('fDone')); };
   ['fPlan', 'fDone', 'fFeel', 'fNext'].forEach((id) => $(id).addEventListener('input', (ev) => autoGrow(ev.target)));
   $('startSel').onchange = (ev) => {
-    const ed = state.edit; const len = ed.endMin - ed.startMin; const st = Number(ev.target.value);
-    setRange(st, st + len);
+    const ed = state.edit; const st = Number(ev.target.value);
+    setRange(Math.min(st, ed.endMin - 10), ed.endMin);
   };
+  $('endNow').onclick = () => { const now = new Date(); const diff = Math.round((parse(ymd(now)) - parse(state.date)) / 86400000); if (diff < 0 || diff > 1) { toast('今日の記録で使えます'); return; } const m = diff * 1440 + Math.round((now.getHours() * 60 + now.getMinutes()) / 10) * 10; if (m <= state.edit.startMin || m > MAX_END) { toast('終了時刻を選んでください'); return; } setRange(state.edit.startMin, m); };
   $('endSel').onchange = (ev) => setRange(state.edit.startMin, Number(ev.target.value));
   $('adj').addEventListener('click', (ev) => {
     const b = ev.target.closest('[data-adj]');
@@ -1413,7 +1415,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261011030758';
+  const APP_VERSION = '20261011165144';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
