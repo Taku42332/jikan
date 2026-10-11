@@ -1051,12 +1051,12 @@
     load(state.date, { scroll: true });
     loadValues();
   };
-  // 下から出る画面（入力・チェック）を下にスワイプして閉じる（先頭までスクロールしているときだけ）
+  // 下向きのスワイプは閉じる操作に使う。上向きは通常のスクロール。
   function swipeToClose(ed, close) {
     let y0 = null, x0 = 0, dy = 0, began = 0, dragging = false;
     const reset = () => { y0 = null; dy = 0; dragging = false; ed.classList.remove('dragging'); ed.style.transform = ''; };
     ed.addEventListener('touchstart', (ev) => {
-      if (ev.touches.length !== 1 || (ed.scrollTop > 1 && !ev.target.closest('.grab')) || ev.target.closest('textarea, select, input')) { y0 = null; return; }
+      if (ev.touches.length !== 1 || ev.target.closest('textarea, select, input')) { y0 = null; return; }
       y0 = ev.touches[0].clientY; x0 = ev.touches[0].clientX; dy = 0; began = Date.now(); dragging = false;
     }, { passive: true });
     ed.addEventListener('touchmove', (ev) => {
@@ -1475,7 +1475,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261011214939';
+  const APP_VERSION = '20261011215051';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
