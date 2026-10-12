@@ -563,7 +563,7 @@
     const cached = cacheGet(date);
     if (cached) { state.day = cached; render(); }
     else { state.day = emptyDay(date); render(); }
-    state.checks = cacheGet('c:' + date); renderChecks();
+    state.checks = checksWithPending(cacheGet('c:' + date)); renderChecks();
     if (opts.scroll) scrollToNow();
     setBusy(true);
     return call(opts.sync ? 'resyncCalendar' : 'getDay', date).then((day) => {
@@ -1110,12 +1110,33 @@
   }
   swipeToClose($('editor'), closeEditor);
   /* ---------- 毎日のチェックリスト・読書記録 ---------- */
+  const checkRevision = {}, checkReadId = {}, checkPending = {}, checkSaveQueue = {}, checkConfirmed = {};
+  function checksWithPending(source) {
+    if (!source) return source;
+    const c = Object.assign({}, source, { state: Object.assign({}, source.state) });
+    Object.keys(checkPending[c.date] || {}).forEach((id) => {
+      const value = checkPending[c.date][id].value;
+      if (id === 'train') c.trainWeek += Number(!!value) - Number(!!c.state[id]);
+      c.state[id] = value;
+    });
+    return c;
+  }
+  function acceptChecks(date, res) {
+    const c = checksWithPending(res);
+    cacheSet('c:' + date, c);
+    if (state.date === date) { state.checks = c; renderChecks(); }
+  }
   function loadChecks(date) {
     const c = cacheGet('c:' + date);
-    if (c) { state.checks = c; renderChecks(); }
+    if (c && state.date === date) { state.checks = checksWithPending(c); renderChecks(); }
+    // 保存中の読み取りは古い値を返し得る。最後の保存結果で更新する。
+    if (Object.keys(checkPending[date] || {}).length) return Promise.resolve();
+    const revision = checkRevision[date] || 0;
+    const readId = checkReadId[date] = (checkReadId[date] || 0) + 1;
     return call('getChecks', date).then((res) => {
-      cacheSet('c:' + date, res);
-      if (state.date === date) { state.checks = res; renderChecks(); }
+      if (revision !== (checkRevision[date] || 0) || readId !== checkReadId[date]) return;
+      checkConfirmed[date] = res;
+      acceptChecks(date, res);
     }).catch(() => {});
   }
   const itemDone = (it, st) => !!(st && st[it.id]);
@@ -1150,15 +1171,34 @@
     $('cpBookTitles').textContent = c.books.titles.length ? c.books.titles.map((t) => '・' + t).join('\n') : 'まだ記録がありません';
   }
   function setCheckLocal(id, value) {
-    const c = state.checks; if (!c) return;
-    c.state[id] = value === true ? '✓' : value;
-    if (id === 'train') c.trainWeek += value ? 1 : -1;
-    renderChecks();
-    const date = state.date;
-    call('setCheck', date, id, value).then((res) => {
-      cacheSet('c:' + date, res);
-      if (state.date === date) { state.checks = res; renderChecks(); }
-    }).catch((err) => toast('チェックを保存できませんでした：' + (err && err.message || err)));
+    const c = state.checks; if (!c || c.date !== state.date) return;
+    const date = c.date, previous = c.state[id] || '';
+    if (!checkConfirmed[date]) checkConfirmed[date] = Object.assign({}, c, { state: Object.assign({}, c.state) });
+    const revision = checkRevision[date] = (checkRevision[date] || 0) + 1;
+    const pending = checkPending[date] || (checkPending[date] = {});
+    pending[id] = { value: value === true ? '✓' : value, revision };
+    acceptChecks(date, c);
+    // 同じ日の保存は順番に送る。未送信の別項目も結果に重ねて表示する。
+    const task = (checkSaveQueue[date] || Promise.resolve()).then(() => call('setCheck', date, id, value)).then((res) => {
+      checkConfirmed[date] = res;
+      if (pending[id] && pending[id].revision === revision) delete pending[id];
+      acceptChecks(date, res);
+    }).catch((err) => {
+      if (pending[id] && pending[id].revision === revision) {
+        delete pending[id];
+        const latest = state.date === date ? state.checks : cacheGet('c:' + date);
+        if (latest) {
+          const restored = Object.assign({}, latest, { state: Object.assign({}, latest.state) });
+          const savedValue = checkConfirmed[date] ? checkConfirmed[date].state[id] || '' : previous;
+          if (id === 'train') restored.trainWeek += Number(!!savedValue) - Number(!!restored.state[id]);
+          restored.state[id] = savedValue;
+          acceptChecks(date, restored);
+        }
+      }
+      toast('チェックを保存できませんでした：' + (err && err.message || err));
+    });
+    checkSaveQueue[date] = task;
+    return task;
   }
   function openChecks() {
     $('scrim').classList.add('on');
@@ -1530,7 +1570,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261012155157';
+  const APP_VERSION = '20261012162724';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
