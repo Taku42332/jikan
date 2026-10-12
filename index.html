@@ -164,6 +164,9 @@
   .blk .bm { position: sticky; bottom: 0; z-index: 1; background: inherit; font-size: 9.5px; margin-top: auto; padding: 3px 0 4px; font-variant-numeric: tabular-nums; }
   .blk .bm span { opacity: 0.75; }
   .blk.plan { background: var(--plan-bg); border-color: var(--plan); }
+  .blk.exact-plan.short { padding: 0 3px; font-size: 9px; line-height: 1.2; border-radius: 5px; }
+  .blk.exact-plan.short .bt { top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .blk.exact-plan.short .bm { display: none; }
   .blk.plan.manual { border-left-style: dashed; }
   .blk.done { background: var(--done-bg); border-color: var(--done); }
   .blk.feel { background: var(--feel-bg); border-color: var(--feel); }
@@ -620,11 +623,18 @@
     // 実施に正確な時刻があれば、その記録のブロックは実際にかかる枠だけに描く（15分未満の端の枠は空ける）
     const vis = {};
     day.columns.done.forEach((sp) => { const x = exactOf(sp); vis[sp.s + '-' + sp.e] = slotsFor(x.startMin, x.endMin); });
+    const planLanes = planLayout(day.columns.plan);
     KEYS.forEach((k, c) => {
       day.columns[k].map((sp) => {
         const v = k !== 'plan' && vis[sp.s + '-' + sp.e];
         return v ? Object.assign({}, sp, { s: Math.max(sp.s, v[0]), e: Math.min(sp.e, v[1]) }) : sp;
-      }).forEach((sp) => {
+      }).forEach((sp, index) => {
+        if (k === 'plan' && Number.isFinite(sp.startMin)) {
+          const lane = planLanes[index], duration = sp.endMin - sp.startMin;
+          const style = 'grid-row:1/49;grid-column:2;align-self:start;min-height:0;margin-top:calc(var(--row) * ' + (sp.startMin / 30) + ' + 2px);height:calc(var(--row) * ' + (duration / 30) + ' - 3px);margin-left:' + (lane.lane * 100 / lane.count) + '%;width:' + (100 / lane.count) + '%';
+          html.push('<div class="blk plan exact-plan' + (duration < 25 ? ' short' : '') + '" title="' + esc(sp.text) + '" data-slot="' + sp.s + '" data-len="' + (sp.e-sp.s+1) + '" data-plan-index="' + index + '" style="' + style + '"><div class="bt">' + esc(splitTime(sp.text).rest) + '</div><div class="bm">' + minLabel(sp.startMin) + '〜' + endMinLabel(sp.endMin) + '</div></div>');
+          return;
+        }
         const meta = sp.e > sp.s ? '<div class="bm"><span>' + slotLabel(sp.s) + '〜' + endLabel(sp.e) + '</span></div>' : '';
         const cls = k === 'plan' && !sp.cal ? ' manual' : '';
         const a = k === 'done' && (day.columns.ans || []).find((x) => x.s <= sp.s && sp.s <= x.e);
@@ -656,6 +666,20 @@
       html.push('<div class="now" data-t="' + now.getHours() + ':' + pad(now.getMinutes()) + '" style="top:calc(var(--row) * ' + (mins / 30) + ')"></div>');
     }
     $('grid').innerHTML = html.join('');
+  }
+
+  // 本当に時刻が重なる予定だけ横に並べる。終了と次の開始が同じなら別の段。
+  function planLayout(spans) {
+    const result = [], sorted = spans.map((sp,index) => ({...exactOf(sp),index})).sort((a,b) => a.startMin-b.startMin);
+    let group = [], end = -1;
+    const finish = () => {
+      const lanes = [];
+      group.forEach(x => {let lane = lanes.findIndex(t => t <= x.startMin);if(lane < 0) lane=lanes.length;lanes[lane]=x.endMin;result[x.index]={lane};});
+      group.forEach(x => result[x.index].count=lanes.length);
+    };
+    sorted.forEach(x => {if(group.length && x.startMin >= end){finish();group=[];end=-1;}group.push(x);end=Math.max(end,x.endMin);});
+    if(group.length) finish();
+    return result;
   }
 
   function renderWeek(today) {
@@ -692,6 +716,7 @@
   }
   // 記録の正確な時刻（本文頭の「9:10〜9:30」、無ければ枠どおり）
   function exactOf(sp) {
+    if (Number.isFinite(sp.startMin) && sp.endMin > sp.startMin) return {startMin:sp.startMin,endMin:sp.endMin};
     const t = splitTime(sp.text);
     return t.startMin !== undefined && t.endMin > t.startMin ? t : { startMin: sp.s * 30, endMin: (sp.e + 1) * 30 };
   }
@@ -759,14 +784,15 @@
     else { s = e = slot; }
 
     const val = (k) => { if (newRange && k !== 'plan') return ''; const sp = spanAt(k, s); return sp ? sp.text : ''; };
-    const planSpan = spanAt('plan', s);
+    const planSpan = opts.planIndex !== undefined ? state.day.columns.plan[opts.planIndex] : state.day.columns.plan.filter(sp => sp.s <= s && s <= sp.e).sort((a,b) => coverage(exactOf(b).startMin,exactOf(b).endMin,s)-coverage(exactOf(a).startMin,exactOf(a).endMin,s))[0];
     const done = splitTime(val('done'));
-    const plan = splitTime(val('plan'));
+    const plan = splitTime(planSpan ? planSpan.text : '');
     // 空き枠はタップした30分。既存の実施だけ、保存済みの正確な時刻を引き継ぐ。
     let startMin = s * 30, endMin = (e + 1) * 30;
     const exact = anchor ? done : {};
     if (exact.startMin !== undefined && exact.endMin > exact.startMin) { startMin = exact.startMin; endMin = exact.endMin; }
     if (newRange) { startMin = newRange[0]; endMin = newRange[1]; }
+    if (!anchor && opts.planIndex !== undefined && planSpan) { startMin=exactOf(planSpan).startMin;endMin=exactOf(planSpan).endMin; }
     state.edit = { s, e, startMin, endMin, prev, origPlan: plan.rest, originalStartMin: startMin, originalEndMin: endMin,
       planRef: planSpan && planSpan.cal ? Object.assign({}, planSpan, exactOf(planSpan)) : null };
 
@@ -780,7 +806,7 @@
     // 予定は表示だけ（変更はカレンダー側で行う）
     $('planRef').hidden = !plan.rest;
     $('planRefText').textContent = plan.rest;
-    $('startPlanned').hidden = !state.edit.planRef || plan.rest.indexOf('\n') >= 0 || state.date !== ymd(new Date());
+    $('startPlanned').hidden = !state.edit.planRef || state.edit.planRef.editable === false || plan.rest.indexOf('\n') >= 0 || state.date !== ymd(new Date());
     $('startPlanned').disabled = !!state.timer;
     $('startPlanned').textContent = state.timer ? '計測中です（先に停止してください）' : '▶ 今から始める';
     $('asPlanned').style.display = plan.rest ? '' : 'none';
@@ -1015,6 +1041,10 @@
     if (cell) { if (cell.dataset.c !== '0') openEditor(Number(cell.dataset.slot)); return; }
     const el = ev.target.closest('.blk[data-slot]');
     if (!el) return;
+    if (el.dataset.planIndex !== undefined) {
+      const sp=state.day.columns.plan[Number(el.dataset.planIndex)];
+      openEditor(sp.s,{planIndex:Number(el.dataset.planIndex)});return;
+    }
     // ブロックの中で押した位置の時間で判断する
     const row = el.getBoundingClientRect();
     const rowH = row.height / (Number(el.dataset.len) || 1);
@@ -1230,7 +1260,7 @@
     const timer = Object.assign({}, state.timer);
     const payload = { id, date: p.date, planRef: ref, startMin: p.min, endMin: p.min + duration, beginTimer: timer };
     const plan = state.day.columns.plan.find(sp => sp.s === ref.s && sp.e === ref.e && sp.text === ref.text);
-    if (plan) { [plan.s, plan.e] = slotsFor(payload.startMin, payload.endMin); plan.text = minLabel(payload.startMin) + '〜' + endMinLabel(payload.endMin) + ' ' + timer.text; }
+    if (plan) { if (Number.isFinite(plan.startMin)) {plan.startMin=payload.startMin;plan.endMin=payload.endMin;} [plan.s, plan.e] = slotsFor(payload.startMin, payload.endMin); plan.text = minLabel(payload.startMin) + '〜' + endMinLabel(payload.endMin) + ' ' + timer.text; }
     closeEditor(); renderTimer(); render();
     plannedStartPromise = submit('savePlanTime', payload, '予定を今の時刻に移動して計測を始めました');
   }
@@ -1508,7 +1538,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261011220509';
+  const APP_VERSION = '20261012090049';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
