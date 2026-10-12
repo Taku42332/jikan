@@ -416,6 +416,8 @@
   <!-- 予定はカレンダーから自動で入るので入力欄は出さず、参考として表示だけする -->
   <div class="planref" id="planRef"><b>予定</b><span id="planRefText"></span></div>
   <button class="plan-start" id="startPlanned" type="button" hidden>▶ 今から始める</button>
+  <button class="ghost" id="insertActual" type="button" hidden>この記録の途中に別の実施を差し込む</button>
+  <div class="hint" id="insertHint" hidden>この時間だけ置き換え、前後の実施は残します。</div>
   <textarea id="fPlan" hidden></textarea>
   <div class="field done">
     <label>実施 <span class="tag done-tag">カレンダーに反映</span><button class="mini" id="asPlanned" type="button">予定どおり</button></label>
@@ -736,9 +738,20 @@
   // opts.newAt: 指定した分から始まる新しい記録として開く
   function openEditor(slot, opts) {
     opts = opts || {};
+    const chosenPlan = opts.planIndex !== undefined ? state.day.columns.plan[opts.planIndex] : null;
+    const existingDone = spanAt('done', slot);
+    let insertActual = !!opts.insertActual;
     let anchor = opts.newAt !== undefined ? null : (spanAt('done', slot) || spanAt('feel', slot) || spanAt('next', slot));
     let newRange = null;
     if (opts.newAt !== undefined) newRange = [opts.newAt, Math.min(1440, opts.newAt + 30)];
+    if (chosenPlan && existingDone) {
+      const planned = exactOf(chosenPlan), actual = exactOf(existingDone);
+      if (planned.startMin !== actual.startMin || planned.endMin !== actual.endMin) {
+        insertActual = true;
+        anchor = null;
+        newRange = [planned.startMin, planned.endMin];
+      }
+    }
     // 前日から続く記録（翌日側）は、前日の元の記録を開いて編集する
     if (anchor) {
       const d0 = spanAt('done', anchor.s);
@@ -778,7 +791,7 @@
     if (exact.startMin !== undefined && exact.endMin > exact.startMin) { startMin = exact.startMin; endMin = exact.endMin; }
     if (newRange) { startMin = newRange[0]; endMin = newRange[1]; }
     if (!anchor && opts.planIndex !== undefined && planSpan) { startMin=exactOf(planSpan).startMin;endMin=exactOf(planSpan).endMin; }
-    state.edit = { s, e, startMin, endMin, prev, origPlan: plan.rest, originalStartMin: startMin, originalEndMin: endMin,
+    state.edit = { s, e, startMin, endMin, prev, insertActual, tapSlot: slot, origPlan: plan.rest, originalStartMin: startMin, originalEndMin: endMin,
       planRef: planSpan && planSpan.cal ? Object.assign({}, planSpan, exactOf(planSpan)) : null };
 
     $('fPlan').value = plan.rest;
@@ -796,6 +809,8 @@
     $('startPlanned').textContent = state.timer ? '計測中です（先に停止してください）' : '▶ 今から始める';
     $('asPlanned').style.display = plan.rest ? '' : 'none';
     $('delBtn').style.display = prev ? '' : 'none';
+    $('insertActual').hidden = !prev;
+    $('insertHint').hidden = !insertActual;
 
     // 直前のネクストアクションを参考表示
     const before = state.day.columns.next.filter((sp) => sp.e < s).pop();
@@ -905,6 +920,7 @@
   function save() {
     const ed = state.edit;
     const fields = { done: $('fDone').value.trim(), feel: $('fFeel').value.trim(), next: $('fNext').value.trim(), ans: (ed.ans || []).join('、') };
+    if (ed.insertActual && !fields.done) { toast('差し込む実施内容を入力してください'); return; }
     const plan = $('fPlan').value.trim();
     const planChanged = plan !== ed.origPlan;
     if (planChanged) fields.plan = plan;
@@ -920,6 +936,7 @@
     if (!ed.prev && !fields.done && !fields.feel && !fields.next && !fields.ans && !planChanged) { closeEditor(); return; }
 
     const payload = { date: state.date, start: ed.s, end: ed.e, startMin: ed.startMin, endMin: ed.endMin, fields, prev: ed.prev };
+    if (ed.insertActual) payload.insertActual = true;
     if (fields.done && ed.planRef && ed.planRef.eventId && ed.planRef.editable !== false) payload.planRef = ed.planRef;
     applyLocal(payload);
     closeEditor();
@@ -939,7 +956,16 @@
     const cols = state.day.columns;
     // 重なる記録は、範囲より前の部分だけ残す（シート側の writeSpan_ と同じ）
     const cut = (k, s, e) => {
-      cols[k] = cols[k].flatMap((sp) => (sp.e < s || sp.s > e) ? [sp] : (sp.s < s ? [Object.assign({}, sp, { e: s - 1 })] : []));
+      cols[k] = cols[k].flatMap((sp) => {
+        if (!p.insertActual) return (sp.e < s || sp.s > e) ? [sp] : (sp.s < s ? [Object.assign({}, sp, { e: s - 1 })] : []);
+        const x = k === 'done' ? exactOf(sp) : { startMin: sp.s * 30, endMin: (sp.e + 1) * 30 };
+        if (x.endMin <= p.startMin || x.startMin >= p.endMin) return [sp];
+        return [[x.startMin, Math.min(x.endMin, p.startMin)], [Math.max(x.startMin, p.endMin), x.endMin]].filter(r => r[1] > r[0]).map(r => {
+          const slots = slotsFor(r[0], r[1]);
+          return Object.assign({}, sp, { s: slots[0], e: slots[1],
+            text: k === 'done' ? minLabel(r[0]) + '〜' + endMinLabel(r[1]) + ' ' + splitTime(sp.text).rest : sp.text });
+        });
+      });
     };
     if (!cols.ans) cols.ans = [];
     ['done', 'feel', 'next', 'ans'].forEach((k) => {
@@ -1366,6 +1392,10 @@
   $('scrim').onclick = () => { closeEditor(); closeChecks(); };
   $('closeBtn').onclick = closeEditor;
   $('saveBtn').onclick = save;
+  $('insertActual').onclick = () => {
+    const ed = state.edit;
+    if (ed) openEditor(ed.tapSlot, { newAt: ed.tapSlot * 30, insertActual: true });
+  };
   $('delBtn').onclick = remove;
   $('asPlanned').onclick = () => { $('fDone').value = splitTime($('fPlan').value).rest; autoGrow($('fDone')); };
   ['fPlan', 'fDone', 'fFeel', 'fNext'].forEach((id) => $(id).addEventListener('input', (ev) => autoGrow(ev.target)));
@@ -1591,7 +1621,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261012182207';
+  const APP_VERSION = '20261012183259';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
