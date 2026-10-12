@@ -920,6 +920,7 @@
     if (!ed.prev && !fields.done && !fields.feel && !fields.next && !fields.ans && !planChanged) { closeEditor(); return; }
 
     const payload = { date: state.date, start: ed.s, end: ed.e, startMin: ed.startMin, endMin: ed.endMin, fields, prev: ed.prev };
+    if (fields.done && ed.planRef && ed.planRef.eventId && ed.planRef.editable !== false) payload.planRef = ed.planRef;
     applyLocal(payload);
     closeEditor();
     submit('saveBlock', payload, '保存しました');
@@ -1529,7 +1530,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261012091134';
+  const APP_VERSION = '20261012091738';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
