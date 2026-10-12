@@ -746,7 +746,7 @@
     if (opts.newAt !== undefined) newRange = [opts.newAt, Math.min(1440, opts.newAt + 30)];
     if (chosenPlan && existingDone) {
       const planned = exactOf(chosenPlan), actual = exactOf(existingDone);
-      if (planned.startMin !== actual.startMin || planned.endMin !== actual.endMin) {
+      if (planned.startMin !== actual.startMin || planned.endMin !== actual.endMin || splitTime(chosenPlan.text).rest !== splitTime(existingDone.text).rest) {
         insertActual = true;
         anchor = null;
         newRange = [planned.startMin, planned.endMin];
@@ -955,9 +955,9 @@
   function applyLocal(p) {
     const cols = state.day.columns;
     // 重なる記録は、範囲より前の部分だけ残す（シート側の writeSpan_ と同じ）
-    const cut = (k, s, e) => {
+    const cut = (k, s, e, preserve) => {
       cols[k] = cols[k].flatMap((sp) => {
-        if (!p.insertActual) return (sp.e < s || sp.s > e) ? [sp] : (sp.s < s ? [Object.assign({}, sp, { e: s - 1 })] : []);
+        if (!preserve) return (sp.e < s || sp.s > e) ? [sp] : (sp.s < s ? [Object.assign({}, sp, { e: s - 1 })] : []);
         const x = k === 'done' ? exactOf(sp) : { startMin: sp.s * 30, endMin: (sp.e + 1) * 30 };
         if (x.endMin <= p.startMin || x.startMin >= p.endMin) return [sp];
         return [[x.startMin, Math.min(x.endMin, p.startMin)], [Math.max(x.startMin, p.endMin), x.endMin]].filter(r => r[1] > r[0]).map(r => {
@@ -969,8 +969,8 @@
     };
     if (!cols.ans) cols.ans = [];
     ['done', 'feel', 'next', 'ans'].forEach((k) => {
-      if (p.prev) cut(k, p.prev.start, p.prev.end);
-      cut(k, p.start, p.end);
+      if (p.prev) cut(k, p.prev.start, p.prev.end, false);
+      cut(k, p.start, p.end, p.insertActual || (p.fields.done && p.endMin <= 1440));
       const exact = p.startMin !== undefined && (p.startMin % 30 || p.endMin % 30 || p.endMin > 1440);
       const text = k === 'done' && exact && p.fields[k] ? minLabel(p.startMin) + '〜' + endMinLabel(p.endMin) + ' ' + p.fields[k] : p.fields[k];
       if (text) cols[k].push({ s: p.start, e: p.end, text });
@@ -1621,7 +1621,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261012183259';
+  const APP_VERSION = '20261012185337';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
