@@ -557,6 +557,21 @@
     });
   }
 
+  // 保存後に古い取得・同期結果が戻っても、実施記録とキャッシュを巻き戻さない。
+  const dayRevision = {}, dayReads = {}, dayPending = {}, activeDaySends = {};
+  let dayWriteQueue = Promise.resolve();
+  function changeDay(date) { dayRevision[date] = (dayRevision[date] || 0) + 1; }
+  function dayReadToken(date) {
+    return { revision: dayRevision[date] || 0, read: dayReads[date] = (dayReads[date] || 0) + 1, pending: dayPending[date] || 0 };
+  }
+  function acceptDay(date, day, token) {
+    if (!day || token.revision !== (dayRevision[date] || 0)) return false;
+    if (!token.write && (token.pending || dayPending[date] || (token.read && token.read !== dayReads[date]))) return false;
+    cacheSet(date, day);
+    if (state.date === date && state.mode === 'day' && !state.edit) { state.day = day; render(); }
+    return true;
+  }
+
   /* ---------- 読み込み ---------- */
   function load(date, opts) {
     opts = opts || {};
@@ -568,16 +583,14 @@
     state.checks = checksWithPending(cacheGet('c:' + date)); renderChecks();
     if (opts.scroll) scrollToNow();
     setBusy(true);
+    const token = dayReadToken(date);
     return call(opts.sync ? 'resyncCalendar' : 'getDay', date).then((day) => {
-      cacheSet(date, day);
-      if (id === state.reqId && state.mode === 'day') { state.day = day; render(); if (opts.sync) toast('カレンダーと同期しました'); }
+      if (!acceptDay(date, day, token)) return;
+      if (opts.sync && id === state.reqId) toast('カレンダーと同期しました');
       // カレンダーの同期は表示のあとに裏で行い、変わっていれば描き直す
       if (day.needSync && !opts.sync) {
-        call('syncDay', date).then((synced) => {
-          if (!synced) return;
-          cacheSet(date, synced);
-          if (state.date === date && state.mode === 'day' && !state.edit) { state.day = synced; render(); }
-        }).catch(() => {});
+        const syncToken = dayReadToken(date);
+        call('syncDay', date).then((synced) => acceptDay(date, synced, syncToken)).catch(() => {});
       }
       if (!opts.prefetched) prefetch(date);
       if (state.date === date) loadChecks(date);
@@ -590,7 +603,8 @@
     [addDays(date, 1), addDays(date, -1)].forEach((d) => {
       if (prefetched[d]) return;
       prefetched[d] = true;
-      call('getDay', d).then((day) => cacheSet(d, day)).catch(() => {});
+      const token = dayReadToken(d);
+      call('getDay', d).then((day) => acceptDay(d, day, token)).catch(() => {});
     });
   }
   function emptyDay(date) { return { date, allDay: [], columns: { plan: [], done: [], feel: [], next: [] } }; }
@@ -953,6 +967,7 @@
 
   // 先に画面へ反映し、保存結果で上書きする
   function applyLocal(p) {
+    changeDay(p.date);
     const cols = state.day.columns;
     // 重なる記録は、範囲より前の部分だけ残す（シート側の writeSpan_ と同じ）
     const cut = (k, s, e, preserve) => {
@@ -979,6 +994,7 @@
       cut('plan', p.start, p.end);
       if (p.fields.plan) cols.plan.push({ s: p.start, e: p.end, text: p.fields.plan, cal: true, appEventId: 'pending' });
     }
+    cacheSet(p.date, JSON.parse(JSON.stringify(state.day)));
     render();
   }
 
@@ -994,17 +1010,30 @@
   }
 
   function send(fn, payload, msg) {
+    // 起動時の再送と直後の保存が同じIDを二重送信しない。
+    if (activeDaySends[payload.id]) return activeDaySends[payload.id];
     const date = payload.date;
+    changeDay(date);
+    const token = { revision: dayRevision[date], write: true };
+    dayPending[date] = (dayPending[date] || 0) + 1;
     setBusy(true);
-    return call(fn, payload).then((day) => {
+    // 読書保存→次の予定の開始を、操作した順番どおりにサーバーへ送る。
+    const request = dayWriteQueue.catch(() => {}).then(() => call(fn, payload));
+    dayWriteQueue = request;
+    const result = request.then((day) => {
       outboxWrite(outboxRead().filter((x) => x.payload.id !== payload.id));
-      cacheSet(date, day);
-      if (state.date === date && state.mode === 'day' && !state.edit) { state.day = day; render(); }
+      acceptDay(date, day, token);
       if (msg) toast(day.warnings && day.warnings.length ? day.warnings.join(' / ') : msg);
       if (day.pendingCalendar) runCalendarJobs();
     }).catch((err) => {
       if (msg) toast('通信できませんでした。次に開いたときに自動で送り直します');
-    }).finally(() => setBusy(false));
+    }).finally(() => {
+      dayPending[date]--;
+      delete activeDaySends[payload.id];
+      setBusy(Object.values(dayPending).some(n => n > 0));
+    });
+    activeDaySends[payload.id] = result;
+    return result;
   }
 
   // 前回送れなかった保存を順番に送り直す
@@ -1029,11 +1058,11 @@
   function runCalendarJobs() {
     if (calRunning) return;
     calRunning = true;
+    const revisions = Object.assign({}, dayRevision), pending = Object.assign({}, dayPending);
     call('processCalendarJobs').then((res) => {
       if (!res) return;
       Object.keys(res.days || {}).forEach((d) => {
-        cacheSet(d, res.days[d]);
-        if (state.date === d && state.mode === 'day' && !state.edit) { state.day = res.days[d]; render(); }
+        acceptDay(d, res.days[d], { revision: revisions[d] || 0, pending: pending[d] || 0 });
       });
       if (res.warnings && res.warnings.length) toast(res.warnings[0]);
     }).catch((err) => toast('カレンダー登録の処理に失敗しました：' + (err && err.message || err)))
@@ -1330,6 +1359,8 @@
     const payload = { id, date: p.date, planRef: ref, startMin: p.min, endMin: p.min + duration, beginTimer: timer };
     const plan = state.day.columns.plan.find(sp => sp.s === ref.s && sp.e === ref.e && sp.text === ref.text);
     if (plan) { if (Number.isFinite(plan.startMin)) {plan.startMin=payload.startMin;plan.endMin=payload.endMin;} [plan.s, plan.e] = slotsFor(payload.startMin, payload.endMin); plan.text = minLabel(payload.startMin) + '〜' + endMinLabel(payload.endMin) + ' ' + timer.text; }
+    changeDay(p.date);
+    cacheSet(p.date, JSON.parse(JSON.stringify(state.day)));
     closeEditor(); renderTimer(); render();
     plannedStartPromise = submit('savePlanTime', payload, '予定を今の時刻に移動して計測を始めました');
   }
@@ -1621,7 +1652,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261012190048';
+  const APP_VERSION = '20261015203457';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
