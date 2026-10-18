@@ -775,7 +775,7 @@
   function openSleepSetup() {
     let dialog=$('sleepSetupDialog');
     if(!dialog){dialog=document.createElement('dialog');dialog.id='sleepSetupDialog';dialog.style.cssText='border:0;border-radius:20px;padding:22px;max-width:390px;width:calc(100% - 32px);color:#25324a';document.body.appendChild(dialog);}
-    dialog.innerHTML='<h3 style="margin-top:0">Garminの睡眠を連携</h3><p>1. 下のボタンで連携キーをコピーします。</p><button id="copySleepKey" type="button">連携キーをコピー</button><p>2. ショートカットを追加し、設定時にキーを貼り付けます。</p><p><a href="https://taku42332.github.io/jikan/sleep-sync.shortcut">睡眠同期ショートカットを追加</a></p><p>3. 実行して睡眠の読み取りと送信を許可します。</p><p style="font-size:12px">Garmin Connectで同期した後に実行してください。睡眠は起床日の「睡眠記録」に保存します。既存の予定・実施やチェックは変更しません。</p><p id="sleepSetupStatus" role="status"></p><button type="button" id="closeSleepSetup">閉じる</button>';
+    dialog.innerHTML='<h3 style="margin-top:0">Garminの睡眠を連携</h3><p>1. 下のボタンで連携キーをコピーします。</p><button id="copySleepKey" type="button">連携キーをコピー</button><p>2. ファイルをダウンロードして開き、「ショートカットを追加」を押します。設定時にキーを貼り付けます。</p><p><a href="https://taku42332.github.io/jikan/sleep-sync.shortcut" download="睡眠を時間管理に同期.shortcut" type="application/x-apple-shortcut">ショートカットをダウンロード</a></p><p>3. 実行して睡眠の読み取りと送信を許可します。</p><p style="font-size:12px">Garmin Connectで同期した後に実行してください。睡眠は起床日の「睡眠記録」に保存します。既存の予定・実施やチェックは変更しません。</p><p id="sleepSetupStatus" role="status"></p><button type="button" id="closeSleepSetup">閉じる</button>';
     let sleepSetup=null;
     $('copySleepKey').disabled=true;
     call('getSleepSetup').then(x=>{sleepSetup=x;if($('copySleepKey')) $('copySleepKey').disabled=false;}).catch(()=>{if($('sleepSetupStatus')) $('sleepSetupStatus').textContent='連携設定を取得できませんでした。閉じてもう一度お試しください。';});
@@ -1693,7 +1693,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261018095028';
+  const APP_VERSION = '20261018095955';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
