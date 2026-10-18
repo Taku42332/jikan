@@ -340,6 +340,7 @@
   <div class="week day-only" id="week"></div>
   <div class="allday day-only" id="allday"></div>
   <section class="reading-progress day-only" id="readingProgress" aria-label="読書の進捗"></section>
+  <section class="day-only" id="sleepSummary" style="margin:4px 12px 6px;padding:9px 12px;border-radius:14px;background:#eef0fb;color:#343d70;font-size:12px" aria-label="睡眠"></section>
   <button class="checkbar day-only" id="checkBar" type="button">今日のチェック</button>
   <div class="cols day-only">
     <div></div>
@@ -576,6 +577,7 @@
   function load(date, opts) {
     opts = opts || {};
     state.date = date;
+    loadSleep(date);
     const id = ++state.reqId;
     const cached = cacheGet(date);
     if (cached) { state.day = cached; render(); }
@@ -622,6 +624,7 @@
     $('subLabel').textContent = diff === 0 ? '今日' : diff === -1 ? '昨日' : diff === 1 ? '明日' : d.getFullYear() + '年';
     $('datePick').value = state.date;
     renderReadingProgress();
+    renderSleep();
     renderWeek(today);
     $('allday').innerHTML = (day.allDay || []).map((t) => '<span class="pill">終日 ' + esc(t) + '</span>').join('');
 
@@ -747,6 +750,42 @@
     el.innerHTML='<div class="rp-head"><span>読書 <strong>'+minutes+'分</strong> / '+(target===null ? '目標読込中' : '目標'+target+'分')+'</span><b>'+(target===null ? '—' : target===0 ? '目標なし' : remaining===0 ? '✓ 達成' : 'あと'+remaining+'分')+'</b></div>'+
       '<div class="rp-track" role="progressbar" aria-label="読書の達成率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.floor(percent)+'"><div class="rp-fill" style="width:'+percent+'%"></div></div>'+
       '<div class="rp-foot">実施の「読書」「本を読む」を自動集計'+(running?' · 計測中も加算':'')+'</div>';
+  }
+
+  const sleepDays = {}, sleepRequests = {};
+  function loadSleep(date) {
+    const request = sleepRequests[date] = (sleepRequests[date] || 0) + 1;
+    call('getSleep', date).then(data => {
+      if (sleepRequests[date] !== request) return;
+      sleepDays[date] = data;
+      if (state.date === date) renderSleep();
+    }).catch(() => {});
+  }
+  function renderSleep() {
+    const el=$('sleepSummary'); if(!el) return;
+    const s=sleepDays[state.date];
+    const duration=n=>Math.floor(n/60)+'時間'+(n%60? n%60+'分':'');
+    el.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>'+
+      (s ? '睡眠 <b>'+esc(s.sleepMin===null?'実睡眠の情報なし':duration(s.sleepMin))+'</b>' : '睡眠の記録')+
+      '</span><button type="button" id="sleepConnect" style="border:0;border-radius:8px;padding:5px 9px;color:#343d70;background:white">'+(s?'連携設定':'睡眠を連携')+'</button></div>'+
+      (s?'<div style="margin-top:4px;font-size:10px">Garmin · 起床日の記録'+(s.bedMin!==null?' · 就床 '+esc(duration(s.bedMin)):'')+' <button type="button" id="sleepRefresh" style="border:0;background:transparent;color:#343d70">更新</button></div>':'');
+    $('sleepConnect').onclick=openSleepSetup;
+    if($('sleepRefresh')) $('sleepRefresh').onclick=()=>loadSleep(state.date);
+  }
+  function openSleepSetup() {
+    let dialog=$('sleepSetupDialog');
+    if(!dialog){dialog=document.createElement('dialog');dialog.id='sleepSetupDialog';dialog.style.cssText='border:0;border-radius:20px;padding:22px;max-width:390px;width:calc(100% - 32px);color:#25324a';document.body.appendChild(dialog);}
+    dialog.innerHTML='<h3 style="margin-top:0">Garminの睡眠を連携</h3><p>1. 下のボタンで連携キーをコピーします。</p><button id="copySleepKey" type="button">連携キーをコピー</button><p>2. ショートカットを追加し、設定時にキーを貼り付けます。</p><p><a href="https://taku42332.github.io/jikan/sleep-sync.shortcut">睡眠同期ショートカットを追加</a></p><p>3. 実行して睡眠の読み取りと送信を許可します。</p><p style="font-size:12px">Garmin Connectで同期した後に実行してください。睡眠は起床日の「睡眠記録」に保存します。既存の予定・実施やチェックは変更しません。</p><p id="sleepSetupStatus" role="status"></p><button type="button" id="closeSleepSetup">閉じる</button>';
+    let sleepSetup=null;
+    $('copySleepKey').disabled=true;
+    call('getSleepSetup').then(x=>{sleepSetup=x;if($('copySleepKey')) $('copySleepKey').disabled=false;}).catch(()=>{if($('sleepSetupStatus')) $('sleepSetupStatus').textContent='連携設定を取得できませんでした。閉じてもう一度お試しください。';});
+    $('copySleepKey').onclick=async()=>{
+      const status=$('sleepSetupStatus'), button=$('copySleepKey');button.disabled=true;
+      try{const setup=sleepSetup;if(!setup)throw new Error('設定取得中');if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(setup.token);status.textContent='コピーしました。追加時の連携キー欄に貼り付けてください。';}else{const input=document.createElement('textarea');input.value=setup.token;input.readOnly=true;input.style.width='100%';status.replaceChildren(input);input.select();}}
+      catch(e){status.textContent='コピーできませんでした。もう一度お試しください。';}finally{button.disabled=false;}
+    };
+    $('closeSleepSetup').onclick=()=>{dialog.close();dialog.innerHTML='';loadSleep(state.date);};
+    dialog.showModal();
   }
 
   // opts.newAt: 指定した分から始まる新しい記録として開く
@@ -1621,6 +1660,8 @@
       return clone(day);
     };
     return {
+      getSleep: () => null,
+      getSleepSetup: () => ({token:'mock-sleep-setup-key'}),
       getValues: () => ({ values: [{ name: 'サンプルA', items: [{ name: '行動項目1', steps: ['段階1', '段階2', '段階3', '段階4', '段階5', '段階6'] }, { name: '行動項目2', steps: ['段階1', '段階2', '段階3', '段階4', '段階5', '段階6'] }] }, { name: 'サンプルB', items: [{ name: '行動項目3', steps: ['段階1', '段階2', '段階3', '段階4', '段階5', '段階6'] }] }], start: '2026-10-12' }),
       getDay: (d) => clone(base(d)),
       savePlanTime: (p) => {
@@ -1652,7 +1693,7 @@
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261016002803';
+  const APP_VERSION = '20261018095028';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
