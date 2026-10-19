@@ -31,3 +31,22 @@ self.addEventListener('fetch', event => {
     return cached || network;
   }));
 });
+
+// Web Pushの本文は一般的な記録忘れの案内だけ。予定名・実施内容は通知に含めない。
+self.addEventListener('push', event => {
+  let data={};try{data=event.data?event.data.json():{};}catch(e){}
+  event.waitUntil(self.registration.showNotification(data.title||'時間の記録を忘れていませんか？',{
+    body:data.body||'今していることを時間管理に記録しましょう。',
+    icon:'./icon.png?v=1',badge:'./icon.png?v=1',tag:data.tag||'jikan-record-gap',
+    data:{url:new URL('./',self.location.href).href}
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target=new URL('./',self.location.href).href;
+  event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(async windows=>{
+    const existing=windows.find(w=>w.url.startsWith(target));
+    if(existing){await existing.focus();return;}
+    return self.clients.openWindow(target);
+  }));
+});

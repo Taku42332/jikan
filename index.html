@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="時間管理">
 <link rel="apple-touch-icon" href="icon.png?v=1">
 <link rel="icon" href="icon.png?v=1">
+<link rel="manifest" href="manifest.webmanifest">
 <style>
 .reading-progress { margin:4px 12px 6px; padding:10px 12px; border-radius:14px; background:#edf6f3; color:#166349; }
 .reading-progress .rp-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; font-size:12px; }
@@ -341,7 +342,7 @@
   <div class="allday day-only" id="allday"></div>
   <section class="reading-progress day-only" id="readingProgress" aria-label="読書の進捗"></section>
   <section class="day-only" id="sleepSummary" style="margin:4px 12px 6px;padding:9px 12px;border-radius:14px;background:#eef0fb;color:#343d70;font-size:12px" aria-label="睡眠"></section>
-  <button class="checkbar day-only" id="checkBar" type="button">今日のチェック</button>
+  <div class="day-only" style="display:flex;align-items:center;gap:6px"><button class="checkbar" id="checkBar" type="button" style="flex:1">今日のチェック</button><button class="mini" type="button" id="recordPushOpen" style="margin-right:12px;white-space:nowrap">通知設定</button></div>
   <div class="cols day-only">
     <div></div>
     <div class="ch plan">予定</div>
@@ -444,6 +445,12 @@
     <button class="primary" id="saveBtn" type="button">保存</button>
   </div>
 </section>
+<dialog id="recordPushDialog" style="border:0;border-radius:20px;padding:22px;width:min(360px,calc(100vw - 32px));box-sizing:border-box;color:#111827">
+<h3 style="margin:0 0 12px">記録忘れの通知</h3>
+<p style="font-size:14px;line-height:1.7">実施記録も計測もない状態が1時間続いたら通知します。<br>23時〜翌9時は通知しません。<br>同じ記録漏れは1回だけ。数分遅れて届くことがあります。</p>
+<p id="recordPushMessage" role="status" style="font-size:13px;line-height:1.6">確認しています…</p>
+<div style="display:flex;flex-wrap:wrap;gap:8px"><button class="primary" type="button" id="recordPushEnable">通知を有効にする</button><button class="ghost" type="button" id="recordPushTest" hidden>テスト通知</button><button class="ghost" type="button" id="recordPushDisable" hidden>通知をオフ</button><button class="ghost" type="button" id="recordPushClose">閉じる</button></div>
+</dialog>
 <div class="toast" id="toast"></div>
 <div class="setup" id="setup" role="dialog" aria-modal="true">
   <section>
@@ -1692,8 +1699,58 @@
 
   if (IS_SITE && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
+  /* ---------- 実施記録の未記録通知 ---------- */
+  let recordPushBusy=false, recordPushConfig=null;
+  function recordPushDeviceId(){
+    let id=localStorage.getItem('jikan-push-device-v1');
+    if(!id){id=crypto.randomUUID();localStorage.setItem('jikan-push-device-v1',id);}return id;
+  }
+  function recordPushKey(text){const s=atob(text.replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(s,c=>c.charCodeAt(0));}
+  function recordPushMessage(text){$('recordPushMessage').textContent=text;}
+  function recordPushSupported(){return IS_SITE&&'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;}
+  async function refreshRecordPush(){
+    if(!recordPushSupported()){recordPushMessage('通知はホーム画面に追加した時間管理アプリで設定できます。');return;}
+    try{
+      recordPushConfig=await call('getRecordNotificationConfig');
+      const reg=await navigator.serviceWorker.ready, sub=await reg.pushManager.getSubscription();
+      const enabled=!!sub&&Notification.permission==='granted';
+      $('recordPushEnable').hidden=enabled;
+      $('recordPushTest').hidden=!enabled;$('recordPushDisable').hidden=!enabled;
+      recordPushMessage(Notification.permission==='denied'?'通知が許可されていません。iPhoneの「設定→通知→時間管理」で許可してください。':enabled?'通知は有効です。':'通知はオフです。');
+      // 端末に購読があっても、サーバー登録が失敗していた場合は復旧する。
+      if(enabled&&recordPushConfig.ready)await call('subscribeRecordNotifications',recordPushDeviceId(),sub.toJSON());
+    }catch(e){recordPushMessage(e.message||'通知設定を確認できませんでした。');}
+  }
+  $('recordPushOpen').onclick=()=>{$('recordPushDialog').showModal();refreshRecordPush();};
+  $('recordPushClose').onclick=()=>$('recordPushDialog').close();
+  $('recordPushEnable').onclick=async()=>{
+    if(recordPushBusy)return;
+    if(!recordPushSupported()){recordPushMessage('ホーム画面の時間管理アプリから開いてください。');return;}
+    if(/iPhone|iPad|iPod/.test(navigator.userAgent)&&!navigator.standalone&&!matchMedia('(display-mode: standalone)').matches){recordPushMessage('ホーム画面に追加した「時間管理」を開いて、通知を有効にしてください。');return;}
+    if(!recordPushConfig||!recordPushConfig.ready){recordPushMessage('通知の準備を確認中です。少し待って、もう一度押してください。');return;}
+    recordPushBusy=true;$('recordPushEnable').disabled=true;
+    try{
+      // ユーザーのタップから直接呼ぶ。読み込みを先に挟むとiOSが許可を表示できない。
+      const permission=await Notification.requestPermission();
+      if(permission!=='granted')throw new Error('通知はまだ許可されていません。');
+      const reg=await navigator.serviceWorker.ready;
+      const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:recordPushKey(recordPushConfig.publicKey)});
+      await call('subscribeRecordNotifications',recordPushDeviceId(),sub.toJSON());
+      await refreshRecordPush();
+      recordPushMessage('通知を有効にしました。「テスト通知」で届くか確認できます。');
+    }catch(e){recordPushMessage(e.message||'通知を有効にできませんでした。');}
+    finally{recordPushBusy=false;$('recordPushEnable').disabled=false;}
+  };
+  $('recordPushTest').onclick=async()=>{if(recordPushBusy)return;recordPushBusy=true;try{await call('testRecordNotification',recordPushDeviceId());recordPushMessage('テスト通知を送信しました。');}catch(e){recordPushMessage(e.message);}finally{recordPushBusy=false;}};
+  $('recordPushDisable').onclick=async()=>{if(recordPushBusy)return;recordPushBusy=true;try{
+    // サーバー停止が成功してから端末の購読を解除する。
+    await call('unsubscribeRecordNotifications',recordPushDeviceId());
+    const reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(sub)await sub.unsubscribe();
+    $('recordPushEnable').hidden=false;$('recordPushTest').hidden=true;$('recordPushDisable').hidden=true;recordPushMessage('通知をオフにしました。');
+  }catch(e){recordPushMessage(e.message);}finally{recordPushBusy=false;}};
+
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261018155131';
+  const APP_VERSION = '20261019174028';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
