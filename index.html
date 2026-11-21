@@ -1716,7 +1716,7 @@
       const enabled=!!sub&&Notification.permission==='granted';
       $('recordPushEnable').hidden=enabled;
       $('recordPushTest').hidden=!enabled;$('recordPushDisable').hidden=!enabled;
-      recordPushMessage(Notification.permission==='denied'?'通知が許可されていません。iPhoneの「設定→通知→時間管理」で許可してください。':enabled?'通知は有効です。':'通知はオフです。');
+      recordPushMessage(Notification.permission==='denied'?(/Android/.test(navigator.userAgent)?'通知が許可されていません。Androidの「設定→アプリ→時間管理→通知」で許可してください。':'通知が許可されていません。iPhoneの「設定→通知→時間管理」で許可してください。'):enabled?'通知は有効です。':'通知はオフです。');
       // 端末に購読があっても、サーバー登録が失敗していた場合は復旧する。
       if(enabled&&recordPushConfig.ready)await call('subscribeRecordNotifications',recordPushDeviceId(),sub.toJSON());
     }catch(e){recordPushMessage(e.message||'通知設定を確認できませんでした。');}
@@ -1750,7 +1750,7 @@
   }catch(e){recordPushMessage(e.message);}finally{recordPushBusy=false;}};
 
   // 新しい版が公開されていたら、端末に保存した画面を入れ替えて読み込み直す（入力中は待つ）
-  const APP_VERSION = '20261019174028';
+  const APP_VERSION = '20261121171630';
   function checkUpdate() {
     if (!IS_SITE || APP_VERSION === 'dev') return;
     fetch('./?nosw=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((html) => {
